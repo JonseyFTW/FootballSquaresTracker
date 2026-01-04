@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  football-squares:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: football-squares-tracker
+    ports:
+      - "3001:3001"
+    volumes:
+      # Persist board data
+      - football-squares-data:/app/server/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    restart: unless-stopped
+
+volumes:
+  football-squares-data:
