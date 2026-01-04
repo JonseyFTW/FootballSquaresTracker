@@ -11,6 +11,8 @@ services:
     volumes:
       # Persist board data
       - football-squares-data:/app/server/data
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=3001

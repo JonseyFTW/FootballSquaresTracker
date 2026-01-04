@@ -99,16 +99,19 @@ function BoardView() {
     const xLastDigit = board.currentScore.xTeam % 10
     const yLastDigit = board.currentScore.yTeam % 10
 
-    const gridSize = board.type === '5x5' ? 5 : 10
-
     for (const square of board.squares) {
-      const { row, col } = square
       let xDigits, yDigits
 
-      if (board.type === '5x5') {
+      if (board.type === 'strip-10') {
+        // Strip-10: digits stored directly on square
+        xDigits = square.xDigits || []
+        yDigits = square.yDigits || []
+      } else if (board.type === '5x5') {
+        const { row, col } = square
         xDigits = [board.xAxis[col * 2], board.xAxis[col * 2 + 1]]
         yDigits = [board.yAxis[row * 2], board.yAxis[row * 2 + 1]]
       } else {
+        const { row, col } = square
         xDigits = [board.xAxis[col]]
         yDigits = [board.yAxis[row]]
       }
@@ -139,7 +142,47 @@ function BoardView() {
     )
   }
 
-  const gridSize = board.type === '5x5' ? 5 : 10
+  const gridSize = board.type === '5x5' ? 5 : (board.type === 'strip-10' ? 10 : 10)
+
+  // Render strip-10 layout
+  const renderStripGrid = () => {
+    return (
+      <div className="strip-grid">
+        {board.squares.map((square) => {
+          const isHighlighted = mySquareNumbers.includes(square.number)
+          const isWinning = winningSquare === square.number
+
+          return (
+            <div
+              key={`square-${square.number}`}
+              className={`strip-square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''}`}
+              onClick={() => {
+                setEditingSquare(square.number)
+                setEditOwnerValue(square.owner || '')
+              }}
+            >
+              <div className="strip-square-header">
+                <span className="square-number">#{square.number}</span>
+              </div>
+              <div className="strip-digits">
+                <div className="strip-digit-group x-digits">
+                  <span className="digit-label">{board.xTeamName}:</span>
+                  <span className="digit-values">{(square.xDigits || []).join(', ')}</span>
+                </div>
+                <div className="strip-digit-group y-digits">
+                  <span className="digit-label">{board.yTeamName}:</span>
+                  <span className="digit-values">{(square.yDigits || []).join(', ')}</span>
+                </div>
+              </div>
+              <div className="strip-owner">
+                {square.owner || 'Available'}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
 
   const renderGrid = () => {
     const rows = []
@@ -252,17 +295,28 @@ function BoardView() {
       </div>
 
       <div className="board-container">
-        <div className="grid-wrapper">
-          <div className="team-labels">
-            <span className="x-team-label">{board.xTeamName}</span>
+        {board.type === 'strip-10' ? (
+          <div className="strip-wrapper">
+            <div className="strip-header">
+              <span className="strip-info">
+                Each square covers 5 {board.xTeamName} digits and 2 {board.yTeamName} digits (10 winning combinations per square)
+              </span>
+            </div>
+            {renderStripGrid()}
           </div>
-          <div className="grid-with-y-label">
-            <div className="y-team-label">{board.yTeamName}</div>
-            <div className={`squares-grid grid-${board.type}`}>
-              {renderGrid()}
+        ) : (
+          <div className="grid-wrapper">
+            <div className="team-labels">
+              <span className="x-team-label">{board.xTeamName}</span>
+            </div>
+            <div className="grid-with-y-label">
+              <div className="y-team-label">{board.yTeamName}</div>
+              <div className={`squares-grid grid-${board.type}`}>
+                {renderGrid()}
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         <div className="sidebar">
           {/* My Squares Tracker */}

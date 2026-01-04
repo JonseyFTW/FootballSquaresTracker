@@ -1,15 +1,25 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const { parseImage } = require('./llmService');
+
+// API keys from environment
+const API_KEYS = {
+  gemini: process.env.GEMINI_API_KEY,
+  openai: process.env.OPENAI_API_KEY,
+  claude: process.env.CLAUDE_API_KEY
+};
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Data storage path
 const DATA_DIR = path.join(__dirname, 'data');
@@ -47,18 +57,20 @@ function calculateWinningScores(board, userSquares) {
     const square = board.squares.find(s => s.number === squareNum);
     if (!square) continue;
 
-    // Get the digit pairs for this square based on board type
-    const { row, col } = square;
     let xDigits, yDigits;
 
-    if (board.type === '5x5') {
+    if (board.type === 'strip-10') {
+      // Strip-10: digits are stored directly on the square
+      xDigits = square.xDigits || [];
+      yDigits = square.yDigits || [];
+    } else if (board.type === '5x5') {
       // In 5x5, each cell covers 2 digits
-      const colIndex = col;
-      const rowIndex = row;
-      xDigits = [board.xAxis[colIndex * 2], board.xAxis[colIndex * 2 + 1]];
-      yDigits = [board.yAxis[rowIndex * 2], board.yAxis[rowIndex * 2 + 1]];
+      const { row, col } = square;
+      xDigits = [board.xAxis[col * 2], board.xAxis[col * 2 + 1]];
+      yDigits = [board.yAxis[row * 2], board.yAxis[row * 2 + 1]];
     } else {
       // In 10x10, each cell covers 1 digit
+      const { row, col } = square;
       xDigits = [board.xAxis[col]];
       yDigits = [board.yAxis[row]];
     }
@@ -103,15 +115,18 @@ function checkCurrentWinner(board, userSquares) {
     const square = board.squares.find(s => s.number === squareNum);
     if (!square) continue;
 
-    const { row, col } = square;
     let xDigits, yDigits;
 
-    if (board.type === '5x5') {
-      const colIndex = col;
-      const rowIndex = row;
-      xDigits = [board.xAxis[colIndex * 2], board.xAxis[colIndex * 2 + 1]];
-      yDigits = [board.yAxis[rowIndex * 2], board.yAxis[rowIndex * 2 + 1]];
+    if (board.type === 'strip-10') {
+      // Strip-10: digits are stored directly on the square
+      xDigits = square.xDigits || [];
+      yDigits = square.yDigits || [];
+    } else if (board.type === '5x5') {
+      const { row, col } = square;
+      xDigits = [board.xAxis[col * 2], board.xAxis[col * 2 + 1]];
+      yDigits = [board.yAxis[row * 2], board.yAxis[row * 2 + 1]];
     } else {
+      const { row, col } = square;
       xDigits = [board.xAxis[col]];
       yDigits = [board.yAxis[row]];
     }
@@ -146,26 +161,88 @@ app.get('/api/boards/:id', (req, res) => {
   res.json(board);
 });
 
+// Helper to generate strip-10 number assignments
+function generateStrip10Assignments() {
+  // Shuffle helper
+  const shuffle = (arr) => {
+    const result = [...arr];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
+  };
+
+  // Create pool: each digit 0-9 appears 5 times for X (primary team)
+  const xPool = [];
+  for (let digit = 0; digit <= 9; digit++) {
+    for (let i = 0; i < 5; i++) {
+      xPool.push(digit);
+    }
+  }
+  const shuffledXPool = shuffle(xPool);
+
+  // Create pool: each digit 0-9 appears 2 times for Y (secondary team)
+  const yPool = [];
+  for (let digit = 0; digit <= 9; digit++) {
+    for (let i = 0; i < 2; i++) {
+      yPool.push(digit);
+    }
+  }
+  const shuffledYPool = shuffle(yPool);
+
+  // Assign to 10 squares: 5 X-digits and 2 Y-digits each
+  const assignments = [];
+  for (let i = 0; i < 10; i++) {
+    const xDigits = shuffledXPool.slice(i * 5, (i + 1) * 5).sort((a, b) => a - b);
+    const yDigits = shuffledYPool.slice(i * 2, (i + 1) * 2).sort((a, b) => a - b);
+    assignments.push({ xDigits, yDigits });
+  }
+
+  return assignments;
+}
+
 // Create new board
 app.post('/api/boards', (req, res) => {
   const { name, type, xTeamName, yTeamName, xAxis, yAxis, prizes } = req.body;
 
-  if (!name || !type || !xTeamName || !yTeamName || !xAxis || !yAxis) {
+  if (!name || !type || !xTeamName || !yTeamName) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  const gridSize = type === '5x5' ? 5 : 10;
-  const squares = [];
-  let squareNum = 1;
+  // For non-strip types, require axis arrays
+  if (type !== 'strip-10' && (!xAxis || !yAxis)) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
 
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
+  let squares = [];
+  let stripAssignments = null;
+
+  if (type === 'strip-10') {
+    // Generate strip-10 board with random number assignments
+    stripAssignments = generateStrip10Assignments();
+    for (let i = 0; i < 10; i++) {
       squares.push({
-        number: squareNum++,
-        row,
-        col,
+        number: i + 1,
+        xDigits: stripAssignments[i].xDigits,
+        yDigits: stripAssignments[i].yDigits,
         owner: ''
       });
+    }
+  } else {
+    // Standard grid board
+    const gridSize = type === '5x5' ? 5 : 10;
+    let squareNum = 1;
+
+    for (let row = 0; row < gridSize; row++) {
+      for (let col = 0; col < gridSize; col++) {
+        squares.push({
+          number: squareNum++,
+          row,
+          col,
+          owner: ''
+        });
+      }
     }
   }
 
@@ -175,8 +252,8 @@ app.post('/api/boards', (req, res) => {
     type,
     xTeamName,
     yTeamName,
-    xAxis: xAxis.map(Number),
-    yAxis: yAxis.map(Number),
+    xAxis: type === 'strip-10' ? [] : xAxis.map(Number),
+    yAxis: type === 'strip-10' ? [] : yAxis.map(Number),
     prizes: prizes || {},
     squares,
     currentScore: { xTeam: 0, yTeam: 0 },
@@ -293,6 +370,56 @@ app.delete('/api/boards/:id', (req, res) => {
   saveBoards(data);
 
   res.json({ success: true });
+});
+
+// Get configured LLM providers (which have API keys in .env)
+app.get('/api/llm-providers', (req, res) => {
+  const providers = [];
+
+  if (API_KEYS.gemini) {
+    providers.push({ id: 'gemini', name: 'Google Gemini', configured: true });
+  }
+  if (API_KEYS.openai) {
+    providers.push({ id: 'openai', name: 'OpenAI GPT-4o-mini', configured: true });
+  }
+  if (API_KEYS.claude) {
+    providers.push({ id: 'claude', name: 'Anthropic Claude', configured: true });
+  }
+
+  res.json({ providers, hasConfiguredProviders: providers.length > 0 });
+});
+
+// Parse image using LLM
+app.post('/api/parse-image', async (req, res) => {
+  try {
+    const { image, provider, apiKey: clientApiKey } = req.body;
+
+    if (!image) {
+      return res.status(400).json({ error: 'No image provided' });
+    }
+
+    if (!provider) {
+      return res.status(400).json({ error: 'No provider specified (gemini, claude, or openai)' });
+    }
+
+    // Use server-side API key if available, otherwise use client-provided key
+    const apiKey = API_KEYS[provider] || clientApiKey;
+
+    if (!apiKey) {
+      return res.status(400).json({
+        error: `No API key configured for ${provider}. Add ${provider.toUpperCase()}_API_KEY to your .env file or enter a key manually.`
+      });
+    }
+
+    // Extract base64 data (remove data:image/...;base64, prefix if present)
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+
+    const result = await parseImage(base64Data, provider, apiKey);
+    res.json(result);
+  } catch (error) {
+    console.error('Image parsing error:', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Serve static files in production

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import ImageImport from './ImageImport'
 
 function CreateBoard() {
   const navigate = useNavigate()
@@ -16,6 +17,8 @@ function CreateBoard() {
     final: ''
   })
   const [loading, setLoading] = useState(false)
+  const [importedSquares, setImportedSquares] = useState(null)
+  const [showImport, setShowImport] = useState(true)
 
   const handleXAxisChange = (index, value) => {
     const newAxis = [...xAxis]
@@ -38,6 +41,28 @@ function CreateBoard() {
     setter(digits.map(String))
   }
 
+  const handleImportComplete = (data) => {
+    // Populate form with imported data
+    setBoardType(data.type)
+    setXTeamName(data.xTeamName)
+    setYTeamName(data.yTeamName)
+    setXAxis(data.xAxis.map(String))
+    setYAxis(data.yAxis.map(String))
+    setPrizes({
+      q1: data.prizes.q1 ? String(data.prizes.q1) : '',
+      half: data.prizes.half ? String(data.prizes.half) : '',
+      q3: data.prizes.q3 ? String(data.prizes.q3) : '',
+      final: data.prizes.final ? String(data.prizes.final) : ''
+    })
+    setImportedSquares(data.squares)
+    setShowImport(false)
+
+    // Generate a default name
+    if (!name) {
+      setName(`${data.yTeamName} vs ${data.xTeamName} Squares`)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
 
@@ -50,15 +75,17 @@ function CreateBoard() {
     const xAxisNums = xAxis.map(Number)
     const yAxisNums = yAxis.map(Number)
 
-    // Validate axis contains all digits 0-9
-    const validAxis = (axis) => {
-      const sorted = [...axis].sort((a, b) => a - b)
-      return sorted.every((val, idx) => val === idx)
-    }
+    // Validate axis contains all digits 0-9 (only for grid types)
+    if (boardType !== 'strip-10') {
+      const validAxis = (axis) => {
+        const sorted = [...axis].sort((a, b) => a - b)
+        return sorted.every((val, idx) => val === idx)
+      }
 
-    if (!validAxis(xAxisNums) || !validAxis(yAxisNums)) {
-      alert('Each axis must contain exactly the digits 0-9 (each digit once)')
-      return
+      if (!validAxis(xAxisNums) || !validAxis(yAxisNums)) {
+        alert('Each axis must contain exactly the digits 0-9 (each digit once)')
+        return
+      }
     }
 
     setLoading(true)
@@ -85,6 +112,20 @@ function CreateBoard() {
 
       if (response.ok) {
         const board = await response.json()
+
+        // If we have imported squares, update them immediately
+        if (importedSquares && importedSquares.length > 0) {
+          try {
+            await fetch(`/api/boards/${board.id}/squares`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ squares: importedSquares })
+            })
+          } catch (err) {
+            console.error('Error updating squares:', err)
+          }
+        }
+
         navigate(`/board/${board.id}`)
       } else {
         alert('Error creating board')
@@ -100,6 +141,27 @@ function CreateBoard() {
   return (
     <div className="card" style={{ maxWidth: '700px', margin: '0 auto' }}>
       <h3>Create New Board</h3>
+
+      {/* Image Import Section */}
+      {showImport ? (
+        <div className="import-section">
+          <ImageImport onImportComplete={handleImportComplete} />
+          <div className="import-divider">
+            <span>or enter details manually</span>
+          </div>
+        </div>
+      ) : (
+        <div className="import-success">
+          <span>Data imported successfully!</span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-small"
+            onClick={() => setShowImport(true)}
+          >
+            Import Another
+          </button>
+        </div>
+      )}
 
       <form className="create-board-form" onSubmit={handleSubmit}>
         <div className="form-group">
@@ -118,6 +180,7 @@ function CreateBoard() {
           <select value={boardType} onChange={(e) => setBoardType(e.target.value)}>
             <option value="5x5">5x5 Grid (25 squares, 2 digits per cell)</option>
             <option value="10x10">10x10 Grid (100 squares, 1 digit per cell)</option>
+            <option value="strip-10">10 Strip (10 squares, 5 digits for one team, 2 for other)</option>
           </select>
         </div>
 
@@ -144,49 +207,64 @@ function CreateBoard() {
           </div>
         </div>
 
-        <div className="axis-input-group">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h4 style={{ color: '#f39c12', margin: 0 }}>X-Axis Numbers (Top Team: {xTeamName || 'Team'})</h4>
-            <button type="button" className="btn btn-secondary" onClick={() => randomizeAxis(setXAxis)}>
-              Randomize
-            </button>
+        {boardType === 'strip-10' ? (
+          <div className="axis-input-group">
+            <h4 style={{ color: '#8892b0', margin: 0 }}>10-Strip Configuration</h4>
+            <p style={{ color: '#8892b0', fontSize: '0.9rem', marginTop: '10px' }}>
+              Each of the 10 squares will be randomly assigned 5 numbers from {xTeamName || 'X-Team'} and 2 numbers from {yTeamName || 'Y-Team'}.
+              This gives each square 10 possible winning score combinations (5 x 2).
+            </p>
+            <p style={{ color: '#64ffda', fontSize: '0.85rem', marginTop: '5px' }}>
+              Numbers are distributed so each digit (0-9) appears in exactly 5 squares for the primary team and 2 squares for the secondary team.
+            </p>
           </div>
-          <div className="axis-digits">
-            {xAxis.map((digit, idx) => (
-              <input
-                key={`x-${idx}`}
-                type="number"
-                min="0"
-                max="9"
-                value={digit}
-                onChange={(e) => handleXAxisChange(idx, e.target.value)}
-                required
-              />
-            ))}
-          </div>
-        </div>
+        ) : (
+          <>
+            <div className="axis-input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h4 style={{ color: '#f39c12', margin: 0 }}>X-Axis Numbers (Top Team: {xTeamName || 'Team'})</h4>
+                <button type="button" className="btn btn-secondary" onClick={() => randomizeAxis(setXAxis)}>
+                  Randomize
+                </button>
+              </div>
+              <div className="axis-digits">
+                {xAxis.map((digit, idx) => (
+                  <input
+                    key={`x-${idx}`}
+                    type="number"
+                    min="0"
+                    max="9"
+                    value={digit}
+                    onChange={(e) => handleXAxisChange(idx, e.target.value)}
+                    required
+                  />
+                ))}
+              </div>
+            </div>
 
-        <div className="axis-input-group">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <h4 style={{ color: '#3498db', margin: 0 }}>Y-Axis Numbers (Left Team: {yTeamName || 'Team'})</h4>
-            <button type="button" className="btn btn-secondary" onClick={() => randomizeAxis(setYAxis)}>
-              Randomize
-            </button>
-          </div>
-          <div className="axis-digits">
-            {yAxis.map((digit, idx) => (
-              <input
-                key={`y-${idx}`}
-                type="number"
-                min="0"
-                max="9"
-                value={digit}
-                onChange={(e) => handleYAxisChange(idx, e.target.value)}
-                required
-              />
-            ))}
-          </div>
-        </div>
+            <div className="axis-input-group">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h4 style={{ color: '#3498db', margin: 0 }}>Y-Axis Numbers (Left Team: {yTeamName || 'Team'})</h4>
+                <button type="button" className="btn btn-secondary" onClick={() => randomizeAxis(setYAxis)}>
+                  Randomize
+                </button>
+              </div>
+              <div className="axis-digits">
+                {yAxis.map((digit, idx) => (
+                  <input
+                    key={`y-${idx}`}
+                    type="number"
+                    min="0"
+                    max="9"
+                    value={digit}
+                    onChange={(e) => handleYAxisChange(idx, e.target.value)}
+                    required
+                  />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
 
         <div className="axis-input-group">
           <h4>Prize Amounts (Optional)</h4>
