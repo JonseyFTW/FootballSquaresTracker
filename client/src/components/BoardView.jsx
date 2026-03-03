@@ -92,9 +92,10 @@ function BoardView() {
     }
   }
 
-  // Calculate winning square based on current score
+  // Calculate winning square based on current score (skip pre-game)
   const winningSquare = useMemo(() => {
     if (!board || !board.currentScore) return null
+    if (board.gamePhase === 'pre-game') return null
 
     const xLastDigit = board.currentScore.xTeam % 10
     const yLastDigit = board.currentScore.yTeam % 10
@@ -184,6 +185,16 @@ function BoardView() {
     )
   }
 
+  // Build a lookup map for O(1) square access by position
+  const squaresByPos = useMemo(() => {
+    if (!board || board.type === 'strip-10') return {}
+    const map = {}
+    for (const square of board.squares) {
+      map[`${square.row}-${square.col}`] = square
+    }
+    return map
+  }, [board])
+
   const renderGrid = () => {
     const rows = []
 
@@ -232,7 +243,7 @@ function BoardView() {
 
       // Squares
       for (let col = 0; col < gridSize; col++) {
-        const square = board.squares.find(s => s.row === row && s.col === col)
+        const square = squaresByPos[`${row}-${col}`]
         if (!square) continue
 
         const isHighlighted = mySquareNumbers.includes(square.number)

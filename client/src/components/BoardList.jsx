@@ -65,7 +65,7 @@ function BoardList() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <h3>{board.name}</h3>
-              <p>{board.type} Grid • {board.type === '5x5' ? '25' : '100'} Squares</p>
+              <p>{board.type === 'strip-10' ? '10-Strip' : `${board.type} Grid`} • {board.type === '5x5' ? '25' : board.type === 'strip-10' ? '10' : '100'} Squares</p>
               <div className="teams">
                 <span className="team-badge x-team">{board.xTeamName}</span>
                 <span className="team-badge y-team">{board.yTeamName}</span>

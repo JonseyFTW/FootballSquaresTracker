@@ -107,6 +107,7 @@ function calculateWinningScores(board, userSquares) {
 // Check if current score matches any of user's squares
 function checkCurrentWinner(board, userSquares) {
   if (!board.currentScore) return null;
+  if (board.gamePhase === 'pre-game') return null;
 
   const xLastDigit = board.currentScore.xTeam % 10;
   const yLastDigit = board.currentScore.yTeam % 10;
@@ -204,7 +205,7 @@ function generateStrip10Assignments() {
 
 // Create new board
 app.post('/api/boards', (req, res) => {
-  const { name, type, xTeamName, yTeamName, xAxis, yAxis, prizes } = req.body;
+  const { name, type, xTeamName, yTeamName, xAxis, yAxis, prizes, squares: importedSquares } = req.body;
 
   if (!name || !type || !xTeamName || !yTeamName) {
     return res.status(400).json({ error: 'Missing required fields' });
@@ -216,32 +217,53 @@ app.post('/api/boards', (req, res) => {
   }
 
   let squares = [];
-  let stripAssignments = null;
 
   if (type === 'strip-10') {
-    // Generate strip-10 board with random number assignments
-    stripAssignments = generateStrip10Assignments();
-    for (let i = 0; i < 10; i++) {
-      squares.push({
-        number: i + 1,
-        xDigits: stripAssignments[i].xDigits,
-        yDigits: stripAssignments[i].yDigits,
-        owner: ''
-      });
-    }
-  } else {
-    // Standard grid board
-    const gridSize = type === '5x5' ? 5 : 10;
-    let squareNum = 1;
-
-    for (let row = 0; row < gridSize; row++) {
-      for (let col = 0; col < gridSize; col++) {
+    if (Array.isArray(importedSquares) && importedSquares.length === 10 && importedSquares[0]?.xDigits) {
+      // Use imported squares with their digit assignments (from LLM or client)
+      squares = importedSquares.map((sq, i) => ({
+        number: sq.number || i + 1,
+        xDigits: (sq.xDigits || []).map(Number),
+        yDigits: (sq.yDigits || []).map(Number),
+        owner: sq.owner || ''
+      }));
+    } else {
+      // Generate strip-10 board with random number assignments
+      const stripAssignments = generateStrip10Assignments();
+      for (let i = 0; i < 10; i++) {
         squares.push({
-          number: squareNum++,
-          row,
-          col,
+          number: i + 1,
+          xDigits: stripAssignments[i].xDigits,
+          yDigits: stripAssignments[i].yDigits,
           owner: ''
         });
+      }
+    }
+  } else {
+    if (Array.isArray(importedSquares) && importedSquares.length > 0) {
+      // Use imported squares (from LLM) for grid types
+      const gridSize = type === '5x5' ? 5 : 10;
+      const expectedCount = gridSize * gridSize;
+      squares = importedSquares.slice(0, expectedCount).map((sq, idx) => ({
+        number: sq.number || idx + 1,
+        row: sq.row ?? Math.floor(idx / gridSize),
+        col: sq.col ?? idx % gridSize,
+        owner: sq.owner || ''
+      }));
+    } else {
+      // Standard grid board with empty squares
+      const gridSize = type === '5x5' ? 5 : 10;
+      let squareNum = 1;
+
+      for (let row = 0; row < gridSize; row++) {
+        for (let col = 0; col < gridSize; col++) {
+          squares.push({
+            number: squareNum++,
+            row,
+            col,
+            owner: ''
+          });
+        }
       }
     }
   }

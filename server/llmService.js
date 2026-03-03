@@ -3,9 +3,16 @@
 
 const EXTRACTION_PROMPT = `Analyze this football squares grid image and extract all the data.
 
+First determine the board type:
+- "10x10": A 10x10 grid with 100 individual squares (each header shows 1 digit)
+- "5x5": A 5x5 grid with 25 squares (each header shows 2 digits)
+- "strip-10": A 10-player strip board where only 10 players each own a block of squares spanning multiple rows/columns. Look for: only ~10 player names, large merged cells, or players spanning across multiple grid positions.
+
 Return a JSON object with EXACTLY this structure (no markdown, just raw JSON):
+
+FOR 5x5 or 10x10 boards:
 {
-  "type": "5x5" or "10x10" (based on grid size),
+  "type": "5x5" or "10x10",
   "xTeamName": "Team name on top/horizontal axis",
   "yTeamName": "Team name on left/vertical axis",
   "xAxis": [array of 10 digits 0-9 in order as shown on x-axis, left to right],
@@ -13,6 +20,25 @@ Return a JSON object with EXACTLY this structure (no markdown, just raw JSON):
   "squares": [
     {"number": 1, "row": 0, "col": 0, "owner": "Name or empty string"},
     ... (all squares in order, row by row)
+  ],
+  "prizes": {
+    "q1": quarter 1 prize amount as number or 0,
+    "half": halftime prize amount as number or 0,
+    "q3": quarter 3 prize amount as number or 0,
+    "final": final prize amount as number or 0
+  }
+}
+
+FOR strip-10 boards:
+{
+  "type": "strip-10",
+  "xTeamName": "Team name on top/horizontal axis (the team with more digit columns)",
+  "yTeamName": "Team name on left/vertical axis",
+  "xAxis": [array of 10 digits 0-9 in order as shown on x-axis, left to right],
+  "yAxis": [array of 10 digits 0-9 in order as shown on y-axis, top to bottom],
+  "squares": [
+    {"number": 1, "owner": "Player name", "xDigits": [the X-axis digits this player's block covers], "yDigits": [the Y-axis digits this player's block covers]},
+    ... (all 10 players in order)
   ],
   "prizes": {
     "q1": quarter 1 prize amount as number or 0,
@@ -32,8 +58,15 @@ CRITICAL - Axis number rules:
 Grid details:
 - For 5x5 grids: 25 squares total (5 rows x 5 cols), each header shows 2 digits
 - For 10x10 grids: 100 squares total, each header shows 1 digit
-- Square numbers go 1-25 (5x5) or 1-100 (10x10), counting left to right, top to bottom
+- For strip-10: 10 players total, each spanning a block of the grid (typically 5 columns x 2 rows)
+- Square numbers go 1-25 (5x5), 1-100 (10x10), or 1-10 (strip-10)
 - Extract owner names exactly as shown (empty string "" if blank)
+
+For strip-10 boards:
+- Each player typically covers 5 X-axis digits and 2 Y-axis digits
+- Look at which columns and rows each player's cell spans
+- The xDigits are the axis digits corresponding to those columns
+- The yDigits are the axis digits corresponding to those rows
 
 Prize amounts should be numbers without $ symbol`;
 
@@ -192,7 +225,7 @@ function parseJsonResponse(text) {
 // Validate and normalize the parsed data
 function validateAndNormalize(data) {
   // Validate required fields
-  if (!data.type || !['5x5', '10x10'].includes(data.type)) {
+  if (!data.type || !['5x5', '10x10', 'strip-10'].includes(data.type)) {
     throw new Error('Invalid or missing board type');
   }
 
@@ -200,27 +233,56 @@ function validateAndNormalize(data) {
     throw new Error('Missing team names');
   }
 
-  if (!Array.isArray(data.xAxis) || !Array.isArray(data.yAxis)) {
-    throw new Error('Missing axis data');
+  if (data.type === 'strip-10') {
+    // Strip-10 validation
+    // Axes are optional for strip-10 (used for reference but digits are on squares)
+    if (Array.isArray(data.xAxis) && data.xAxis.length > 0) {
+      data.xAxis = normalizeAxis(data.xAxis);
+    } else {
+      data.xAxis = [];
+    }
+    if (Array.isArray(data.yAxis) && data.yAxis.length > 0) {
+      data.yAxis = normalizeAxis(data.yAxis);
+    } else {
+      data.yAxis = [];
+    }
+
+    // Validate squares
+    if (!Array.isArray(data.squares) || data.squares.length !== 10) {
+      throw new Error(`Expected 10 squares for strip-10, got ${data.squares?.length || 0}`);
+    }
+
+    // Normalize strip-10 squares
+    data.squares = data.squares.map((sq, idx) => ({
+      number: sq.number || idx + 1,
+      xDigits: (sq.xDigits || []).map(d => parseInt(d, 10)).filter(d => !isNaN(d)),
+      yDigits: (sq.yDigits || []).map(d => parseInt(d, 10)).filter(d => !isNaN(d)),
+      owner: sq.owner || ''
+    }));
+  } else {
+    // Grid type validation
+    if (!Array.isArray(data.xAxis) || !Array.isArray(data.yAxis)) {
+      throw new Error('Missing axis data');
+    }
+
+    // Normalize axis arrays to have exactly 10 digits
+    data.xAxis = normalizeAxis(data.xAxis);
+    data.yAxis = normalizeAxis(data.yAxis);
+
+    // Validate squares
+    const expectedSquares = data.type === '5x5' ? 25 : 100;
+    if (!Array.isArray(data.squares) || data.squares.length !== expectedSquares) {
+      throw new Error(`Expected ${expectedSquares} squares, got ${data.squares?.length || 0}`);
+    }
+
+    // Normalize squares
+    data.squares = data.squares.map((sq, idx) => ({
+      number: sq.number || idx + 1,
+      row: sq.row ?? Math.floor(idx / (data.type === '5x5' ? 5 : 10)),
+      col: sq.col ?? idx % (data.type === '5x5' ? 5 : 10),
+      owner: sq.owner || ''
+    }));
   }
-
-  // Normalize axis arrays to have exactly 10 digits
-  data.xAxis = normalizeAxis(data.xAxis);
-  data.yAxis = normalizeAxis(data.yAxis);
-
-  // Validate squares
-  const expectedSquares = data.type === '5x5' ? 25 : 100;
-  if (!Array.isArray(data.squares) || data.squares.length !== expectedSquares) {
-    throw new Error(`Expected ${expectedSquares} squares, got ${data.squares?.length || 0}`);
-  }
-
-  // Normalize squares
-  data.squares = data.squares.map((sq, idx) => ({
-    number: sq.number || idx + 1,
-    row: sq.row ?? Math.floor(idx / (data.type === '5x5' ? 5 : 10)),
-    col: sq.col ?? idx % (data.type === '5x5' ? 5 : 10),
-    owner: sq.owner || ''
-  }));
 
   // Normalize prizes
   data.prizes = {

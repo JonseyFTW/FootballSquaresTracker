@@ -46,8 +46,16 @@ function CreateBoard() {
     setBoardType(data.type)
     setXTeamName(data.xTeamName)
     setYTeamName(data.yTeamName)
-    setXAxis(data.xAxis.map(String))
-    setYAxis(data.yAxis.map(String))
+
+    // Strip-10 may not have axis arrays
+    if (data.type === 'strip-10') {
+      setXAxis(Array(10).fill(''))
+      setYAxis(Array(10).fill(''))
+    } else {
+      setXAxis((data.xAxis || []).map(String))
+      setYAxis((data.yAxis || []).map(String))
+    }
+
     setPrizes({
       q1: data.prizes.q1 ? String(data.prizes.q1) : '',
       half: data.prizes.half ? String(data.prizes.half) : '',
@@ -91,41 +99,34 @@ function CreateBoard() {
     setLoading(true)
 
     try {
+      const boardPayload = {
+        name,
+        type: boardType,
+        xTeamName,
+        yTeamName,
+        xAxis: xAxisNums,
+        yAxis: yAxisNums,
+        prizes: {
+          q1: prizes.q1 ? parseFloat(prizes.q1) : 0,
+          half: prizes.half ? parseFloat(prizes.half) : 0,
+          q3: prizes.q3 ? parseFloat(prizes.q3) : 0,
+          final: prizes.final ? parseFloat(prizes.final) : 0
+        }
+      }
+
+      // Include imported squares in the creation request (avoids race condition)
+      if (importedSquares && importedSquares.length > 0) {
+        boardPayload.squares = importedSquares
+      }
+
       const response = await fetch('/api/boards', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          type: boardType,
-          xTeamName,
-          yTeamName,
-          xAxis: xAxisNums,
-          yAxis: yAxisNums,
-          prizes: {
-            q1: prizes.q1 ? parseFloat(prizes.q1) : 0,
-            half: prizes.half ? parseFloat(prizes.half) : 0,
-            q3: prizes.q3 ? parseFloat(prizes.q3) : 0,
-            final: prizes.final ? parseFloat(prizes.final) : 0
-          }
-        })
+        body: JSON.stringify(boardPayload)
       })
 
       if (response.ok) {
         const board = await response.json()
-
-        // If we have imported squares, update them immediately
-        if (importedSquares && importedSquares.length > 0) {
-          try {
-            await fetch(`/api/boards/${board.id}/squares`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ squares: importedSquares })
-            })
-          } catch (err) {
-            console.error('Error updating squares:', err)
-          }
-        }
-
         navigate(`/board/${board.id}`)
       } else {
         alert('Error creating board')
