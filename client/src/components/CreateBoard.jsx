@@ -67,7 +67,7 @@ function CreateBoard() {
 
     // Generate a default name
     if (!name) {
-      setName(`${data.yTeamName} vs ${data.xTeamName} Squares`)
+      setName(`${data.xTeamName} vs ${data.yTeamName} Squares`)
     }
   }
 

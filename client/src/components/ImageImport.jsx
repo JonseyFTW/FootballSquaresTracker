@@ -225,39 +225,49 @@ function ImageImport({ onImportComplete }) {
         )}
       </div>
 
-      {/* Drop Zone */}
-      <div
-        className={`drop-zone ${imagePreview ? 'has-image' : ''}`}
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onClick={() => !imagePreview && fileInputRef.current?.click()}
-      >
-        {imagePreview ? (
+      {/* Drop Zone + Browse Button */}
+      {imagePreview ? (
+        <div className="drop-zone has-image">
           <div className="image-preview-container">
             <img src={imagePreview} alt="Preview" className="image-preview" />
             <button
               type="button"
               className="btn btn-secondary clear-image"
-              onClick={(e) => { e.stopPropagation(); clearImage(); }}
+              onClick={clearImage}
             >
               Clear
             </button>
           </div>
-        ) : (
-          <div className="drop-zone-content">
-            <div className="drop-icon">📷</div>
-            <p>Drop an image here or click to select</p>
-            <small>Supports PNG, JPG, WEBP</small>
+        </div>
+      ) : (
+        <>
+          <div
+            className="drop-zone"
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+          >
+            <div className="drop-zone-content">
+              <div className="drop-icon">📷</div>
+              <p>Drag & drop an image here</p>
+              <small>Supports PNG, JPG, WEBP</small>
+            </div>
           </div>
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileSelect}
-          style={{ display: 'none' }}
-        />
-      </div>
+          <button
+            type="button"
+            className="btn btn-browse"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Browse Files
+          </button>
+        </>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelect}
+        style={{ display: 'none' }}
+      />
 
       {/* Error Display */}
       {error && (

@@ -30,6 +30,10 @@ function BoardView() {
   const fetchBoard = async () => {
     try {
       const response = await fetch(`/api/boards/${id}`)
+      if (!response.ok) {
+        setBoard(null)
+        return
+      }
       const data = await response.json()
       setBoard(data)
     } catch (error) {
@@ -62,6 +66,10 @@ function BoardView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ xTeam: scoreX, yTeam: scoreY, gamePhase })
       })
+      if (!response.ok) {
+        console.error('Error updating score: server returned', response.status)
+        return
+      }
       const data = await response.json()
       setBoard(data)
 
@@ -83,6 +91,10 @@ function BoardView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ owner: editOwnerValue })
       })
+      if (!response.ok) {
+        console.error('Error updating owner: server returned', response.status)
+        return
+      }
       const data = await response.json()
       setBoard(data)
       setEditingSquare(null)
@@ -109,10 +121,12 @@ function BoardView() {
         yDigits = square.yDigits || []
       } else if (board.type === '5x5') {
         const { row, col } = square
+        if (row == null || col == null) continue
         xDigits = [board.xAxis[col * 2], board.xAxis[col * 2 + 1]]
         yDigits = [board.yAxis[row * 2], board.yAxis[row * 2 + 1]]
       } else {
         const { row, col } = square
+        if (row == null || col == null) continue
         xDigits = [board.xAxis[col]]
         yDigits = [board.yAxis[row]]
       }
@@ -123,6 +137,16 @@ function BoardView() {
     }
 
     return null
+  }, [board])
+
+  // Build a lookup map for O(1) square access by position (must be before early returns - Rules of Hooks)
+  const squaresByPos = useMemo(() => {
+    if (!board || board.type === 'strip-10') return {}
+    const map = {}
+    for (const square of board.squares) {
+      map[`${square.row}-${square.col}`] = square
+    }
+    return map
   }, [board])
 
   if (loading) {
@@ -185,16 +209,6 @@ function BoardView() {
     )
   }
 
-  // Build a lookup map for O(1) square access by position
-  const squaresByPos = useMemo(() => {
-    if (!board || board.type === 'strip-10') return {}
-    const map = {}
-    for (const square of board.squares) {
-      map[`${square.row}-${square.col}`] = square
-    }
-    return map
-  }, [board])
-
   const renderGrid = () => {
     const rows = []
 
@@ -244,7 +258,10 @@ function BoardView() {
       // Squares
       for (let col = 0; col < gridSize; col++) {
         const square = squaresByPos[`${row}-${col}`]
-        if (!square) continue
+        if (!square) {
+          rowCells.push(<div key={`empty-${row}-${col}`} className="square empty" />)
+          continue
+        }
 
         const isHighlighted = mySquareNumbers.includes(square.number)
         const isWinning = winningSquare === square.number

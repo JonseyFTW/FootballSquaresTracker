@@ -812,6 +812,31 @@ body {
   font-size: 0.8rem;
 }
 
+.btn-browse {
+  width: 100%;
+  padding: 14px 20px;
+  border: 2px solid #f39c12;
+  border-radius: 8px;
+  background: rgba(243, 156, 18, 0.1);
+  color: #f39c12;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.btn-browse:hover {
+  background: rgba(243, 156, 18, 0.2);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(243, 156, 18, 0.3);
+}
+
+.btn-browse:active {
+  transform: translateY(0);
+}
+
 .import-error {
   background: rgba(231, 76, 60, 0.2);
   border: 1px solid #e74c3c;

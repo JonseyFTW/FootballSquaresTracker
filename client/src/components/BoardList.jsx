@@ -27,7 +27,11 @@ function BoardList() {
     if (!confirm('Are you sure you want to delete this board?')) return
 
     try {
-      await fetch(`/api/boards/${id}`, { method: 'DELETE' })
+      const response = await fetch(`/api/boards/${id}`, { method: 'DELETE' })
+      if (!response.ok) {
+        alert('Failed to delete board')
+        return
+      }
       setBoards(boards.filter(b => b.id !== id))
     } catch (error) {
       console.error('Error deleting board:', error)
