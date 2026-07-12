@@ -60,6 +60,7 @@ Copy `.env.example` to `.env`. All values are optional:
 |---|---|
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` / `CLAUDE_API_KEY` | Enables image import with that provider (users can also paste a key in the UI) |
 | `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | Image import through [OpenRouter](https://openrouter.ai) â€” one key, any vision model; users can name a model per-import |
+| `GOOGLE_CLIENT_ID` | Enables "Sign in with Google" (OAuth web client ID; no secret needed) |
 | `RESEND_API_KEY` / `EMAIL_FROM` | Password-reset emails via [Resend](https://resend.com). Unset = reset links are logged to the server console |
 | `APP_URL` | Public origin for reset links; defaults to the request host |
 | `PORT` | Server port, defaults to `3001` |
@@ -108,6 +109,7 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) â€
 - `PUT /api/boards/:id/payments` - Mark an owner name paid/unpaid (`{name, paid}`)
 - `POST /api/auth/register` / `POST /api/auth/login` / `GET /api/me` - Accounts (scrypt + signed bearer tokens)
 - `POST /api/auth/forgot` / `POST /api/auth/reset` - Password reset (30-min single-use links; emailed via Resend or logged server-side)
+- `POST /api/auth/google` / `GET /api/auth/config` - Sign in with Google (verified ID tokens; links to existing accounts by verified email)
 - `POST /api/leagues`, `GET /api/leagues`, `GET/PUT/DELETE /api/leagues/:id` - Leagues (owner only)
 - `POST /api/leagues/:id/members`, `DELETE /api/leagues/:id/members/:memberId` - Roster
 - `GET /api/league-share/:token` - Public read-only league page

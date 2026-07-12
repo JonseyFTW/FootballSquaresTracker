@@ -8,6 +8,7 @@ const { getScoreboard, getGame, applyGameToBoard } = require('./nflService');
 const storage = require('./storage');
 const auth = require('./authService');
 const { sendPasswordResetEmail } = require('./emailService');
+const { verifyGoogleIdToken } = require('./googleAuth');
 const { computeAnalytics } = require('./analyticsService');
 const {
   shuffle,
@@ -193,6 +194,55 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/me', requireAuth, (req, res) => {
   res.json({ user: auth.publicUser(req.user) });
+});
+
+// Public auth configuration for the client (which providers to offer)
+app.get('/api/auth/config', (req, res) => {
+  res.json({ googleClientId: process.env.GOOGLE_CLIENT_ID || null });
+});
+
+// Sign in with Google: the client posts the GIS credential (a signed
+// ID token); we verify it and link-or-create the account by verified
+// email, then issue our normal session token.
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    if (!process.env.GOOGLE_CLIENT_ID) {
+      return res.status(501).json({ error: 'Google sign-in is not configured' });
+    }
+
+    const identity = await verifyGoogleIdToken(req.body.credential);
+    if (!identity) {
+      return res.status(401).json({ error: "Google sign-in couldn't be verified — try again" });
+    }
+
+    const email = auth.normalizeEmail(identity.email);
+    let user = await storage.getUserByEmail(email);
+
+    if (user) {
+      // Existing account (password or Google) — link the Google id once.
+      // Safe because Google guarantees the email is verified.
+      if (!user.googleId) {
+        user.googleId = identity.googleId;
+        await storage.saveUser(user);
+      }
+    } else {
+      user = {
+        id: uuidv4(),
+        email,
+        name: sanitizeName(identity.name, 60) || email.split('@')[0],
+        googleId: identity.googleId,
+        authProvider: 'google',
+        trackedGames: [],
+        createdAt: new Date().toISOString()
+      };
+      await storage.saveUser(user);
+    }
+
+    res.json({ token: auth.signToken(user.id), user: auth.publicUser(user) });
+  } catch (error) {
+    console.error('Error with Google sign-in:', error);
+    res.status(500).json({ error: 'Google sign-in failed' });
+  }
 });
 
 // Request a password reset link. The response never reveals whether an
