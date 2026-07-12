@@ -1,6 +1,8 @@
 # Football Squares Tracker
 
-A web application to track your football squares throughout a game and see what scores you need to win.
+A web application to run football squares pools: create boards, draw numbers fairly, track payments, share view-only boards with your group, and watch every square update with live NFL scores.
+
+New visitors get a marketing landing page at `/`; the app itself lives at `/boards` and friends. SEO is handled with static meta/Open Graph/Twitter tags, JSON-LD structured data, a generated `og-image.png`, and `robots.txt` + `sitemap.xml` (all under `client/public/` and `client/index.html`).
 
 ## Features
 

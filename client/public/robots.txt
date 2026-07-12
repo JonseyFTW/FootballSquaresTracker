@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /board/
+Disallow: /share/
+Disallow: /league/
+Disallow: /me
+
+Sitemap: https://football-squares-tracker.vercel.app/sitemap.xml
