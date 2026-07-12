@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
 import { useTitle } from '../useTitle'
+import GoogleButton from './GoogleButton'
 
 function AuthPage({ mode }) {
   const { login, register } = useAuth()
@@ -44,6 +45,8 @@ function AuthPage({ mode }) {
           ? 'Run leagues, share boards, and track how your squares do over time.'
           : 'Welcome back — sign in to manage your leagues and see your stats.'}
       </p>
+
+      <GoogleButton mode={isRegister ? 'signup' : 'signin'} nextPath={nextPath} />
 
       <form className="create-board-form" onSubmit={handleSubmit}>
         {isRegister && (
