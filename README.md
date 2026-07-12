@@ -11,7 +11,8 @@ A web application to track your football squares throughout a game and see what 
 - **Import from a Photo**: Upload a screenshot or photo of a real squares board and an AI provider (Gemini, OpenAI, or Claude) extracts the teams, axis digits, owners, and prizes. Any digits the AI had to auto-correct are flagged for you to verify.
 - **Square Tracking**: Enter your square numbers to highlight them on the board — they're remembered per board on your device.
 - **Winning Combinations**: See all the score combinations that would result in a win for your squares, with realistic example scores.
-- **Live Score Updates**: Update the game score (quick +7/+3/+1 buttons) and instantly see who's winning.
+- **Live NFL Scores**: Link a board to a real NFL game (via ESPN's public scoreboard) and the score and quarter update automatically — every 30 seconds while the game is live. Pick the game from a list, confirm which team is on which axis (auto-suggested from your team names), and watch the winning square move in real time.
+- **Live Score Updates**: Or update the score manually (quick +7/+3/+1 buttons) and instantly see who's winning.
 - **Period Results**: Record the winning square for each quarter/half/final alongside its prize amount, so payouts stay visible after the score moves on.
 - **Square Management**: Click any square to assign an owner (and edit digit coverage on strip boards).
 
@@ -84,6 +85,10 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) �
 - `DELETE /api/boards/:id` - Delete a board
 - `GET /api/llm-providers` - Which AI providers have server-configured keys
 - `POST /api/parse-image` - Extract board data from an image via Gemini/OpenAI/Claude
+- `GET /api/health` - Health check; reports which storage backend is active
+- `GET /api/nfl/scoreboard?dates=YYYYMMDD` - List NFL games from ESPN (defaults to the current week)
+- `PUT /api/boards/:id/live-game` - Link (`{eventId, xTeamSide}`) or unlink (`{clear: true}`) a live NFL game
+- `POST /api/boards/:id/sync-live` - Pull the linked game's latest score/quarter into the board
 
 ## Tech Stack
 
