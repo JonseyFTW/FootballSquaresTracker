@@ -131,7 +131,7 @@ code as it existed when the audit was taken.
 
 These are worthwhile but are projects, not fixes — deliberately not included above:
 
-- Live NFL score integration (auto-update scores from a sports API)
+- [x] ~~Live NFL score integration (auto-update scores from a sports API)~~ — **shipped after the audit**: boards can link to a real NFL game via ESPN's public API and auto-sync score/quarter every 30s while live (`server/nflService.js`, Live Score Sync card in the board view).
 - Multi-user boards with share links / realtime sync (websockets)
 - Auth + per-user board ownership
 - Payment/payout tracking per player

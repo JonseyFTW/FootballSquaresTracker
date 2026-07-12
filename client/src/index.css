@@ -1223,3 +1223,198 @@ body {
   font-size: 0.85rem;
   color: #3498db;
 }
+
+/* Live NFL score sync */
+.live-indicator {
+  display: inline-block;
+  margin-top: 12px;
+  margin-left: 10px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #8892b0;
+}
+
+.live-indicator.in {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+  animation: live-pulse 2s infinite;
+}
+
+.live-indicator.post {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(231, 76, 60, 0.5); }
+  50% { box-shadow: 0 0 14px rgba(231, 76, 60, 0.7); }
+}
+
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.live-badge {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  background: rgba(52, 152, 219, 0.2);
+  color: #3498db;
+}
+
+.live-badge.in {
+  background: rgba(231, 76, 60, 0.2);
+  color: #e74c3c;
+  animation: live-pulse 2s infinite;
+}
+
+.live-badge.post {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.live-game-name {
+  font-size: 0.85rem;
+  color: #fff;
+  word-break: break-word;
+}
+
+.live-detail {
+  color: #8892b0;
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+}
+
+.live-hint {
+  color: #8892b0;
+  font-size: 0.85rem;
+  margin-bottom: 15px;
+}
+
+.live-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.live-actions .btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+
+/* Link game modal */
+.modal.modal-wide {
+  max-width: 540px;
+}
+
+.game-date-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.game-date-row input[type="date"] {
+  flex: 1;
+  padding: 10px 12px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: #fff;
+  font-size: 0.9rem;
+  color-scheme: dark;
+  margin-bottom: 0;
+}
+
+.game-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 15px;
+}
+
+.game-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.game-row:hover {
+  border-color: rgba(243, 156, 18, 0.5);
+}
+
+.game-row.selected {
+  border-color: #f39c12;
+  background: rgba(243, 156, 18, 0.1);
+}
+
+.game-row input[type="radio"] {
+  width: auto;
+  margin: 0;
+  accent-color: #f39c12;
+}
+
+.game-row .game-name {
+  flex: 1;
+  font-size: 0.9rem;
+  color: #fff;
+}
+
+.game-row .game-state {
+  font-size: 0.75rem;
+  color: #8892b0;
+  white-space: nowrap;
+}
+
+.side-picker {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 12px 15px;
+  margin-bottom: 15px;
+}
+
+.side-picker p {
+  font-size: 0.85rem;
+  color: #8892b0;
+  margin-bottom: 10px;
+}
+
+.side-picker label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  color: #fff;
+  cursor: pointer;
+}
+
+.side-picker input[type="radio"] {
+  width: auto;
+  margin: 0;
+  accent-color: #f39c12;
+}
+
+.side-tag {
+  font-size: 0.7rem;
+  color: #6c7a89;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}

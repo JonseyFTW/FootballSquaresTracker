@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 
 const PERIODS = [
@@ -33,6 +33,24 @@ function BoardView() {
   const [scoreY, setScoreY] = useState('0')
   const [gamePhase, setGamePhase] = useState('pre-game')
   const [recordingPeriod, setRecordingPeriod] = useState(null)
+
+  // Live NFL game sync
+  const [showLinkModal, setShowLinkModal] = useState(false)
+  const [liveGames, setLiveGames] = useState([])
+  const [gamesLoading, setGamesLoading] = useState(false)
+  const [gamesError, setGamesError] = useState(null)
+  const [linkDate, setLinkDate] = useState('')
+  const [selectedGameId, setSelectedGameId] = useState(null)
+  const [selectedSide, setSelectedSide] = useState('home')
+  const [linking, setLinking] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [liveError, setLiveError] = useState(null)
+
+  // Refs so timers and async callbacks always see current values
+  const boardRef = useRef(null)
+  const mySquaresRef = useRef([])
+  useEffect(() => { boardRef.current = board }, [board])
+  useEffect(() => { mySquaresRef.current = mySquareNumbers }, [mySquareNumbers])
 
   const storageKey = `fst-my-squares-${id}`
 
@@ -72,10 +90,155 @@ function BoardView() {
         setMySquares(saved)
         trackSquares(saved)
       }
+
+      // Linked boards should show the real score immediately, not the
+      // score from whenever the board was last synced
+      if (data.liveGame && data.liveGame.lastSync?.state !== 'post') {
+        syncLiveScore(false)
+      }
     } catch (error) {
       console.error('Error fetching board:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // ----- Live NFL score sync -----
+
+  const syncLiveScore = async (manual = false) => {
+    setSyncing(true)
+    try {
+      const response = await fetch(`/api/boards/${id}/sync-live`, { method: 'POST' })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        if (manual) setLiveError(data.error || 'Failed to sync live score')
+        return
+      }
+      setLiveError(null)
+      const prev = boardRef.current
+      const scoreChanged =
+        prev?.currentScore?.xTeam !== data.board.currentScore.xTeam ||
+        prev?.currentScore?.yTeam !== data.board.currentScore.yTeam
+      setBoard(data.board)
+      if (scoreChanged && mySquaresRef.current.length > 0) {
+        trackSquares(mySquaresRef.current.join(','))
+      }
+    } catch (error) {
+      console.error('Error syncing live score:', error)
+      if (manual) setLiveError('Failed to sync live score')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
+  // Poll while linked: every 30s during the game, every 2 min pre-game,
+  // never once it's final. Each board update reschedules the next tick.
+  useEffect(() => {
+    if (!board?.liveGame) return
+    const state = board.liveGame.lastSync?.state
+    if (state === 'post') return
+    const delay = state === 'in' ? 30000 : 120000
+    const timer = setTimeout(() => syncLiveScore(false), delay)
+    return () => clearTimeout(timer)
+  }, [board])
+
+  const matchesTeam = (team, name) => {
+    const wanted = (name || '').trim().toLowerCase()
+    if (!wanted) return false
+    const full = (team.name || '').toLowerCase()
+    const abbr = (team.abbreviation || '').toLowerCase()
+    return full.includes(wanted) || wanted === abbr ||
+      wanted.split(/\s+/).some(word => word.length > 2 && full.includes(word))
+  }
+
+  const guessSide = (game) => {
+    if (matchesTeam(game.home, board?.xTeamName)) return 'home'
+    if (matchesTeam(game.away, board?.xTeamName)) return 'away'
+    // Try the y-team: if it matches home, x must be away
+    if (matchesTeam(game.home, board?.yTeamName)) return 'away'
+    if (matchesTeam(game.away, board?.yTeamName)) return 'home'
+    return 'home'
+  }
+
+  const loadGames = async (dateValue) => {
+    setGamesLoading(true)
+    setGamesError(null)
+    try {
+      const dates = (dateValue || '').replaceAll('-', '')
+      const response = await fetch(`/api/nfl/scoreboard${dates ? `?dates=${dates}` : ''}`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setLiveGames([])
+        setGamesError(data.error || 'Failed to load NFL games')
+        return
+      }
+      setLiveGames(data.games || [])
+      if ((data.games || []).length === 0) {
+        setGamesError('No NFL games found for this date — try another date.')
+      }
+    } catch (error) {
+      console.error('Error loading NFL games:', error)
+      setLiveGames([])
+      setGamesError('Failed to load NFL games')
+    } finally {
+      setGamesLoading(false)
+    }
+  }
+
+  const openLinkModal = () => {
+    setShowLinkModal(true)
+    setSelectedGameId(null)
+    setLinkDate('')
+    loadGames('')
+  }
+
+  const selectGame = (game) => {
+    setSelectedGameId(game.id)
+    setSelectedSide(guessSide(game))
+  }
+
+  const linkGame = async () => {
+    const game = liveGames.find(g => g.id === selectedGameId)
+    if (!game) return
+    setLinking(true)
+    try {
+      const response = await fetch(`/api/boards/${id}/live-game`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId: game.id, xTeamSide: selectedSide })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setGamesError(data.error || 'Failed to link game')
+        return
+      }
+      setBoard(data)
+      setShowLinkModal(false)
+      setLiveError(null)
+      if (mySquaresRef.current.length > 0) {
+        trackSquares(mySquaresRef.current.join(','))
+      }
+    } catch (error) {
+      console.error('Error linking game:', error)
+      setGamesError('Failed to link game')
+    } finally {
+      setLinking(false)
+    }
+  }
+
+  const unlinkGame = async () => {
+    if (!confirm('Unlink this board from the live game? The score stays but stops updating.')) return
+    try {
+      const response = await fetch(`/api/boards/${id}/live-game`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear: true })
+      })
+      if (!response.ok) return
+      const data = await response.json()
+      setBoard(data)
+    } catch (error) {
+      console.error('Error unlinking game:', error)
     }
   }
 
@@ -433,6 +596,14 @@ function BoardView() {
           </div>
         </div>
         <div className="game-phase">{board.gamePhase || 'pre-game'}</div>
+        {board.liveGame && (
+          <div className={`live-indicator ${board.liveGame.lastSync?.state || 'pre'}`}>
+            {board.liveGame.lastSync?.state === 'in' ? '● LIVE' :
+              board.liveGame.lastSync?.state === 'post' ? '🏁 FINAL' : '⏱ SCHEDULED'}
+            {board.liveGame.lastSync?.detail ? ` — ${board.liveGame.lastSync.detail}` : ''}
+            {syncing ? ' (syncing…)' : ''}
+          </div>
+        )}
         {winningSquares.length > 0 && (
           <div className="winning-banner">
             {winningSquares.length === 1 ? 'Current Winning Square: ' : 'Current Winning Squares: '}
@@ -526,9 +697,50 @@ function BoardView() {
             )}
           </div>
 
+          {/* Live NFL Score Sync */}
+          <div className="card">
+            <h3>Live Score Sync</h3>
+            {board.liveGame ? (
+              <>
+                <div className="live-status">
+                  <span className={`live-badge ${board.liveGame.lastSync?.state || 'pre'}`}>
+                    {board.liveGame.lastSync?.state === 'in' ? '● LIVE' :
+                      board.liveGame.lastSync?.state === 'post' ? 'FINAL' : 'SCHEDULED'}
+                  </span>
+                  <span className="live-game-name">{board.liveGame.gameName}</span>
+                </div>
+                <p className="live-detail">
+                  {board.liveGame.lastSync?.detail || 'Waiting for first sync'}
+                  {board.liveGame.lastSync?.state === 'in' && ' — auto-updating every 30s'}
+                </p>
+                {liveError && <div className="track-error">{liveError}</div>}
+                <div className="live-actions">
+                  <button className="btn btn-secondary" onClick={() => syncLiveScore(true)} disabled={syncing}>
+                    {syncing ? 'Syncing…' : 'Sync Now'}
+                  </button>
+                  <button className="btn btn-secondary" onClick={unlinkGame}>Unlink</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="live-hint">
+                  Link this board to a real NFL game and the score and quarter update automatically from ESPN.
+                </p>
+                <button className="btn btn-primary" style={{ width: '100%' }} onClick={openLinkModal}>
+                  Link NFL Game
+                </button>
+              </>
+            )}
+          </div>
+
           {/* Score Controls */}
           <div className="card">
             <h3>Update Score</h3>
+            {board.liveGame && (
+              <p className="live-hint" style={{ marginBottom: '10px' }}>
+                This board is linked to a live game — manual changes will be overwritten on the next sync.
+              </p>
+            )}
             <div className="score-controls">
               <div className="score-input-group">
                 <label>{board.xTeamName}</label>
@@ -625,6 +837,92 @@ function BoardView() {
           </div>
         </div>
       </div>
+
+      {/* Link Live Game Modal */}
+      {showLinkModal && (() => {
+        const selectedGame = liveGames.find(g => g.id === selectedGameId)
+        return (
+          <div className="modal-overlay" onClick={() => setShowLinkModal(false)}>
+            <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+              <h3>Link a Live NFL Game</h3>
+              <div className="game-date-row">
+                <input
+                  type="date"
+                  value={linkDate}
+                  onChange={(e) => { setLinkDate(e.target.value); loadGames(e.target.value) }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-small"
+                  onClick={() => { setLinkDate(''); loadGames('') }}
+                >
+                  This Week
+                </button>
+              </div>
+
+              {gamesLoading ? (
+                <div className="loading" style={{ minHeight: '100px' }}>
+                  <div className="spinner"></div>
+                </div>
+              ) : (
+                <div className="game-list">
+                  {liveGames.map(game => (
+                    <label key={game.id} className={`game-row ${selectedGameId === game.id ? 'selected' : ''}`}>
+                      <input
+                        type="radio"
+                        name="live-game"
+                        checked={selectedGameId === game.id}
+                        onChange={() => selectGame(game)}
+                      />
+                      <span className="game-name">{game.name}</span>
+                      <span className="game-state">
+                        {game.state === 'in' ? game.detail :
+                          game.state === 'post' ? `Final ${game.away.score}-${game.home.score}` :
+                          game.date ? new Date(game.date).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : ''}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {gamesError && <div className="track-error">{gamesError}</div>}
+
+              {selectedGame && (
+                <div className="side-picker">
+                  <p>Which team is <strong>{board.xTeamName}</strong> (the top axis)?</p>
+                  <label>
+                    <input
+                      type="radio"
+                      name="x-side"
+                      checked={selectedSide === 'home'}
+                      onChange={() => setSelectedSide('home')}
+                    />
+                    {selectedGame.home.name} <span className="side-tag">home</span>
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="x-side"
+                      checked={selectedSide === 'away'}
+                      onChange={() => setSelectedSide('away')}
+                    />
+                    {selectedGame.away.name} <span className="side-tag">away</span>
+                  </label>
+                </div>
+              )}
+
+              <div className="modal-actions">
+                <button className="btn btn-secondary" onClick={() => setShowLinkModal(false)}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={linkGame} disabled={!selectedGameId || linking}>
+                  {linking ? 'Linking…' : 'Link Game'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Edit Square Modal */}
       {editingSquare && (

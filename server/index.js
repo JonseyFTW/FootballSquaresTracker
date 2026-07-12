@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { parseImage } = require('./llmService');
+const { getScoreboard, getGame, applyGameToBoard } = require('./nflService');
 const {
   generateStrip10Assignments,
   findWinningSquares,
@@ -154,6 +155,31 @@ function sanitizeDigits(digits) {
 // ============================================================
 // API Routes (all async)
 // ============================================================
+
+// Health check — reports which storage backend is live so deployments
+// can be verified (memory on Vercel means boards vanish on cold starts).
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    storage: usePostgres ? 'postgres' : (useInMemory ? 'memory' : 'file'),
+    persistent: usePostgres || !process.env.VERCEL
+  });
+});
+
+// List NFL games from ESPN (optional ?dates=YYYYMMDD, defaults to the
+// current week's scoreboard)
+app.get('/api/nfl/scoreboard', async (req, res) => {
+  try {
+    const { dates } = req.query;
+    if (dates && !/^\d{8}$/.test(dates)) {
+      return res.status(400).json({ error: 'dates must be in YYYYMMDD format' });
+    }
+    res.json(await getScoreboard(dates));
+  } catch (error) {
+    console.error('Error fetching NFL scoreboard:', error);
+    res.status(502).json({ error: 'Failed to fetch NFL scoreboard' });
+  }
+});
 
 // Get all boards
 app.get('/api/boards', async (req, res) => {
@@ -400,6 +426,68 @@ app.put('/api/boards/:id/score', async (req, res) => {
   } catch (error) {
     console.error('Error updating score:', error);
     res.status(500).json({ error: 'Failed to update score' });
+  }
+});
+
+// Link (or unlink) a board to a live NFL game. xTeamSide says whether
+// the board's x-team is ESPN's home or away side.
+app.put('/api/boards/:id/live-game', async (req, res) => {
+  try {
+    const { eventId, xTeamSide, clear } = req.body;
+
+    const board = await getBoardById(req.params.id);
+    if (!board) {
+      return res.status(404).json({ error: 'Board not found' });
+    }
+
+    if (clear) {
+      delete board.liveGame;
+      await updateBoard(board);
+      return res.json(board);
+    }
+
+    if (!eventId || !['home', 'away'].includes(xTeamSide)) {
+      return res.status(400).json({ error: 'eventId and xTeamSide (home|away) are required' });
+    }
+
+    // Validate the event against ESPN and pull the current score right away
+    const game = await getGame(String(eventId));
+    board.liveGame = {
+      eventId: String(eventId),
+      xTeamSide,
+      gameName: game.name,
+      linkedAt: new Date().toISOString()
+    };
+    applyGameToBoard(board, game);
+
+    await updateBoard(board);
+    res.json(board);
+  } catch (error) {
+    console.error('Error linking live game:', error);
+    res.status(502).json({ error: 'Failed to link live game (ESPN lookup failed)' });
+  }
+});
+
+// Pull the latest live score from ESPN into the board
+app.post('/api/boards/:id/sync-live', async (req, res) => {
+  try {
+    const board = await getBoardById(req.params.id);
+    if (!board) {
+      return res.status(404).json({ error: 'Board not found' });
+    }
+
+    if (!board.liveGame?.eventId) {
+      return res.status(400).json({ error: 'Board is not linked to a live game' });
+    }
+
+    const game = await getGame(board.liveGame.eventId);
+    applyGameToBoard(board, game);
+
+    await updateBoard(board);
+    res.json({ board, game });
+  } catch (error) {
+    console.error('Error syncing live score:', error);
+    res.status(502).json({ error: 'Failed to sync live score' });
   }
 });
 
