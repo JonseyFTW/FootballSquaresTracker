@@ -5,6 +5,13 @@ const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const { parseImage } = require('./llmService');
+const {
+  generateStrip10Assignments,
+  findWinningSquares,
+  checkCurrentWinners,
+  calculateWinningScores,
+  isValidAxisPermutation
+} = require('./gameLogic');
 
 // Determine storage mode: Postgres on Vercel, file-based locally
 const usePostgres = !!process.env.POSTGRES_URL;
@@ -19,6 +26,12 @@ const API_KEYS = {
   openai: process.env.OPENAI_API_KEY,
   claude: process.env.CLAUDE_API_KEY
 };
+
+const BOARD_TYPES = ['5x5', '10x10', 'strip-10'];
+const LLM_PROVIDERS = ['gemini', 'openai', 'claude'];
+const PERIODS = ['q1', 'half', 'q3', 'final'];
+const MAX_OWNER_LENGTH = 60;
+const MAX_PHASE_LENGTH = 30;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -121,130 +134,21 @@ async function removeBoardById(id) {
 }
 
 // ============================================================
-// Game logic (pure functions, no storage dependency)
+// Input sanitizers
 // ============================================================
 
-function calculateWinningScores(board, userSquares) {
-  const winningCombinations = [];
-
-  for (const squareNum of userSquares) {
-    const square = board.squares.find(s => s.number === squareNum);
-    if (!square) continue;
-
-    let xDigits, yDigits;
-
-    if (board.type === 'strip-10') {
-      xDigits = square.xDigits || [];
-      yDigits = square.yDigits || [];
-    } else if (board.type === '5x5') {
-      const { row, col } = square;
-      xDigits = [board.xAxis[col * 2], board.xAxis[col * 2 + 1]];
-      yDigits = [board.yAxis[row * 2], board.yAxis[row * 2 + 1]];
-    } else {
-      const { row, col } = square;
-      xDigits = [board.xAxis[col]];
-      yDigits = [board.yAxis[row]];
-    }
-
-    for (const xDigit of xDigits) {
-      for (const yDigit of yDigits) {
-        const examples = [];
-        for (let x = 0; x <= 50; x += 10) {
-          for (let y = 0; y <= 50; y += 10) {
-            const xScore = x + xDigit;
-            const yScore = y + yDigit;
-            if (xScore <= 56 && yScore <= 56) {
-              examples.push({ x: xScore, y: yScore });
-            }
-          }
-        }
-
-        winningCombinations.push({
-          squareNumber: squareNum,
-          owner: square.owner,
-          xTeamDigit: xDigit,
-          yTeamDigit: yDigit,
-          exampleScores: examples.slice(0, 6)
-        });
-      }
-    }
-  }
-
-  return winningCombinations;
+function sanitizeOwner(owner) {
+  if (typeof owner !== 'string') return '';
+  return owner.trim().slice(0, MAX_OWNER_LENGTH);
 }
 
-function checkCurrentWinner(board, userSquares) {
-  if (!board.currentScore) return null;
-  if (board.gamePhase === 'pre-game') return null;
-
-  const xLastDigit = board.currentScore.xTeam % 10;
-  const yLastDigit = board.currentScore.yTeam % 10;
-
-  const winners = [];
-
-  for (const squareNum of userSquares) {
-    const square = board.squares.find(s => s.number === squareNum);
-    if (!square) continue;
-
-    let xDigits, yDigits;
-
-    if (board.type === 'strip-10') {
-      xDigits = square.xDigits || [];
-      yDigits = square.yDigits || [];
-    } else if (board.type === '5x5') {
-      const { row, col } = square;
-      if (row == null || col == null) continue;
-      xDigits = [board.xAxis[col * 2], board.xAxis[col * 2 + 1]];
-      yDigits = [board.yAxis[row * 2], board.yAxis[row * 2 + 1]];
-    } else {
-      const { row, col } = square;
-      if (row == null || col == null) continue;
-      xDigits = [board.xAxis[col]];
-      yDigits = [board.yAxis[row]];
-    }
-
-    if (xDigits.includes(xLastDigit) && yDigits.includes(yLastDigit)) {
-      winners.push({
-        squareNumber: squareNum,
-        owner: square.owner,
-        isWinning: true
-      });
-    }
-  }
-
-  return winners.length > 0 ? winners[0] : null;
-}
-
-function generateStrip10Assignments() {
-  const shuffle = (arr) => {
-    const result = [...arr];
-    for (let i = result.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result;
-  };
-
-  const xPool = [];
-  for (let digit = 0; digit <= 9; digit++) {
-    for (let i = 0; i < 5; i++) xPool.push(digit);
-  }
-  const shuffledXPool = shuffle(xPool);
-
-  const yPool = [];
-  for (let digit = 0; digit <= 9; digit++) {
-    for (let i = 0; i < 2; i++) yPool.push(digit);
-  }
-  const shuffledYPool = shuffle(yPool);
-
-  const assignments = [];
-  for (let i = 0; i < 10; i++) {
-    const xDigits = shuffledXPool.slice(i * 5, (i + 1) * 5).sort((a, b) => a - b);
-    const yDigits = shuffledYPool.slice(i * 2, (i + 1) * 2).sort((a, b) => a - b);
-    assignments.push({ xDigits, yDigits });
-  }
-
-  return assignments;
+// Comma of ints 0-9, deduped and sorted. Returns null when nothing valid.
+function sanitizeDigits(digits) {
+  if (!Array.isArray(digits)) return null;
+  const clean = [...new Set(
+    digits.map(d => parseInt(d, 10)).filter(d => !isNaN(d) && d >= 0 && d <= 9)
+  )].sort((a, b) => a - b);
+  return clean.length > 0 ? clean : null;
 }
 
 // ============================================================
@@ -285,8 +189,14 @@ app.post('/api/boards', async (req, res) => {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    if (type !== 'strip-10' && (!xAxis || !yAxis)) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!BOARD_TYPES.includes(type)) {
+      return res.status(400).json({ error: `Invalid board type. Use one of: ${BOARD_TYPES.join(', ')}` });
+    }
+
+    if (type !== 'strip-10') {
+      if (!isValidAxisPermutation(xAxis) || !isValidAxisPermutation(yAxis)) {
+        return res.status(400).json({ error: 'Each axis must contain the digits 0-9 exactly once' });
+      }
     }
 
     let squares = [];
@@ -295,9 +205,9 @@ app.post('/api/boards', async (req, res) => {
       if (Array.isArray(importedSquares) && importedSquares.length === 10 && importedSquares[0]?.xDigits) {
         squares = importedSquares.map((sq, i) => ({
           number: sq.number || i + 1,
-          xDigits: (sq.xDigits || []).map(Number),
-          yDigits: (sq.yDigits || []).map(Number),
-          owner: sq.owner || ''
+          xDigits: sanitizeDigits(sq.xDigits) || [],
+          yDigits: sanitizeDigits(sq.yDigits) || [],
+          owner: sanitizeOwner(sq.owner)
         }));
       } else {
         const stripAssignments = generateStrip10Assignments();
@@ -311,38 +221,43 @@ app.post('/api/boards', async (req, res) => {
         }
       }
     } else {
-      if (Array.isArray(importedSquares) && importedSquares.length > 0) {
-        const gridSize = type === '5x5' ? 5 : 10;
-        const expectedCount = gridSize * gridSize;
-        squares = importedSquares.slice(0, expectedCount).map((sq, idx) => ({
-          number: sq.number || idx + 1,
-          row: sq.row ?? Math.floor(idx / gridSize),
-          col: sq.col ?? idx % gridSize,
-          owner: sq.owner || ''
-        }));
-      } else {
-        const gridSize = type === '5x5' ? 5 : 10;
-        let squareNum = 1;
-        for (let row = 0; row < gridSize; row++) {
-          for (let col = 0; col < gridSize; col++) {
-            squares.push({ number: squareNum++, row, col, owner: '' });
+      // Always build the full grid row-major so the board can never have
+      // holes, then overlay any imported owners by position.
+      const gridSize = type === '5x5' ? 5 : 10;
+      const ownerByPos = {};
+      if (Array.isArray(importedSquares)) {
+        for (const sq of importedSquares) {
+          if (sq && sq.row != null && sq.col != null) {
+            ownerByPos[`${sq.row}-${sq.col}`] = sanitizeOwner(sq.owner);
           }
+        }
+      }
+      let squareNum = 1;
+      for (let row = 0; row < gridSize; row++) {
+        for (let col = 0; col < gridSize; col++) {
+          squares.push({
+            number: squareNum++,
+            row,
+            col,
+            owner: ownerByPos[`${row}-${col}`] || ''
+          });
         }
       }
     }
 
     const newBoard = {
       id: uuidv4(),
-      name,
+      name: String(name).trim().slice(0, 100),
       type,
-      xTeamName,
-      yTeamName,
+      xTeamName: String(xTeamName).trim().slice(0, 40),
+      yTeamName: String(yTeamName).trim().slice(0, 40),
       xAxis: type === 'strip-10' ? [] : xAxis.map(Number),
       yAxis: type === 'strip-10' ? [] : yAxis.map(Number),
       prizes: prizes || {},
       squares,
       currentScore: { xTeam: 0, yTeam: 0 },
       gamePhase: 'pre-game',
+      periodResults: {},
       createdAt: new Date().toISOString()
     };
 
@@ -354,7 +269,9 @@ app.post('/api/boards', async (req, res) => {
   }
 });
 
-// Update board squares (assign owners)
+// Update board squares in bulk (owners and, for strip boards, digits).
+// Geometry (row/col/number) always comes from the stored board so a bad
+// payload can't corrupt the grid.
 app.put('/api/boards/:id/squares', async (req, res) => {
   try {
     const { squares } = req.body;
@@ -368,7 +285,26 @@ app.put('/api/boards/:id/squares', async (req, res) => {
       return res.status(404).json({ error: 'Board not found' });
     }
 
-    board.squares = squares;
+    const incomingByNumber = new Map();
+    for (const sq of squares) {
+      if (sq && sq.number != null) {
+        incomingByNumber.set(parseInt(sq.number, 10), sq);
+      }
+    }
+
+    board.squares = board.squares.map(existing => {
+      const incoming = incomingByNumber.get(existing.number);
+      if (!incoming) return existing;
+      const updated = { ...existing, owner: sanitizeOwner(incoming.owner) };
+      if (board.type === 'strip-10') {
+        const xDigits = sanitizeDigits(incoming.xDigits);
+        const yDigits = sanitizeDigits(incoming.yDigits);
+        if (xDigits) updated.xDigits = xDigits;
+        if (yDigits) updated.yDigits = yDigits;
+      }
+      return updated;
+    });
+
     await updateBoard(board);
     res.json(board);
   } catch (error) {
@@ -377,10 +313,10 @@ app.put('/api/boards/:id/squares', async (req, res) => {
   }
 });
 
-// Update single square owner
+// Update single square: owner and, for strip boards, digit coverage
 app.put('/api/boards/:id/squares/:squareNum', async (req, res) => {
   try {
-    const { owner } = req.body;
+    const { owner, xDigits, yDigits } = req.body;
     const squareNum = parseInt(req.params.squareNum, 10);
 
     const board = await getBoardById(req.params.id);
@@ -393,7 +329,28 @@ app.put('/api/boards/:id/squares/:squareNum', async (req, res) => {
       return res.status(404).json({ error: 'Square not found' });
     }
 
-    board.squares[squareIndex].owner = owner;
+    const square = board.squares[squareIndex];
+    if (owner !== undefined) {
+      square.owner = sanitizeOwner(owner);
+    }
+
+    if (board.type === 'strip-10') {
+      if (xDigits !== undefined) {
+        const clean = sanitizeDigits(xDigits);
+        if (!clean) {
+          return res.status(400).json({ error: 'xDigits must contain at least one digit 0-9' });
+        }
+        square.xDigits = clean;
+      }
+      if (yDigits !== undefined) {
+        const clean = sanitizeDigits(yDigits);
+        if (!clean) {
+          return res.status(400).json({ error: 'yDigits must contain at least one digit 0-9' });
+        }
+        square.yDigits = clean;
+      }
+    }
+
     await updateBoard(board);
     res.json(board);
   } catch (error) {
@@ -412,6 +369,10 @@ app.put('/api/boards/:id/score', async (req, res) => {
       return res.status(404).json({ error: 'Board not found' });
     }
 
+    if (!board.currentScore) {
+      board.currentScore = { xTeam: 0, yTeam: 0 };
+    }
+
     if (xTeam !== undefined) {
       const parsed = parseInt(xTeam, 10);
       if (isNaN(parsed) || parsed < 0) {
@@ -427,7 +388,10 @@ app.put('/api/boards/:id/score', async (req, res) => {
       board.currentScore.yTeam = parsed;
     }
 
-    if (gamePhase) {
+    if (gamePhase !== undefined) {
+      if (typeof gamePhase !== 'string' || gamePhase.length === 0 || gamePhase.length > MAX_PHASE_LENGTH) {
+        return res.status(400).json({ error: 'Invalid game phase' });
+      }
       board.gamePhase = gamePhase;
     }
 
@@ -436,6 +400,47 @@ app.put('/api/boards/:id/score', async (req, res) => {
   } catch (error) {
     console.error('Error updating score:', error);
     res.status(500).json({ error: 'Failed to update score' });
+  }
+});
+
+// Record (or clear) the winning square for a game period, so prize
+// payouts stay visible after the score moves on.
+app.put('/api/boards/:id/period-result', async (req, res) => {
+  try {
+    const { period, clear } = req.body;
+
+    if (!PERIODS.includes(period)) {
+      return res.status(400).json({ error: `period must be one of: ${PERIODS.join(', ')}` });
+    }
+
+    const board = await getBoardById(req.params.id);
+    if (!board) {
+      return res.status(404).json({ error: 'Board not found' });
+    }
+
+    board.periodResults = board.periodResults || {};
+
+    if (clear) {
+      delete board.periodResults[period];
+      await updateBoard(board);
+      return res.json(board);
+    }
+
+    if (!board.currentScore || board.gamePhase === 'pre-game') {
+      return res.status(400).json({ error: 'Set the score and game phase before recording a result' });
+    }
+
+    board.periodResults[period] = {
+      winners: findWinningSquares(board),
+      score: { xTeam: board.currentScore.xTeam, yTeam: board.currentScore.yTeam },
+      recordedAt: new Date().toISOString()
+    };
+
+    await updateBoard(board);
+    res.json(board);
+  } catch (error) {
+    console.error('Error recording period result:', error);
+    res.status(500).json({ error: 'Failed to record period result' });
   }
 });
 
@@ -448,7 +453,14 @@ app.get('/api/boards/:id/my-squares', async (req, res) => {
       return res.status(400).json({ error: 'Please provide square numbers' });
     }
 
-    const userSquares = squares.split(',').map(s => parseInt(s.trim(), 10));
+    const userSquares = [...new Set(
+      squares.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+    )];
+
+    if (userSquares.length === 0) {
+      return res.status(400).json({ error: 'No valid square numbers provided' });
+    }
+
     const board = await getBoardById(req.params.id);
 
     if (!board) {
@@ -456,13 +468,15 @@ app.get('/api/boards/:id/my-squares', async (req, res) => {
     }
 
     const winningCombinations = calculateWinningScores(board, userSquares);
-    const currentWinner = checkCurrentWinner(board, userSquares);
+    const currentWinners = checkCurrentWinners(board, userSquares);
 
     res.json({
       board,
       userSquares,
       winningCombinations,
-      currentWinner,
+      currentWinners,
+      // Deprecated: kept for older clients that expect a single winner
+      currentWinner: currentWinners[0] || null,
       currentScore: board.currentScore
     });
   } catch (error) {
@@ -509,12 +523,12 @@ app.post('/api/parse-image', async (req, res) => {
   try {
     const { image, provider, apiKey: clientApiKey } = req.body;
 
-    if (!image) {
+    if (!image || typeof image !== 'string') {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    if (!provider) {
-      return res.status(400).json({ error: 'No provider specified (gemini, claude, or openai)' });
+    if (!LLM_PROVIDERS.includes(provider)) {
+      return res.status(400).json({ error: 'No valid provider specified (gemini, claude, or openai)' });
     }
 
     const apiKey = API_KEYS[provider] || clientApiKey;
@@ -525,13 +539,27 @@ app.post('/api/parse-image', async (req, res) => {
       });
     }
 
-    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
-    const result = await parseImage(base64Data, provider, apiKey);
+    // Preserve the real mime type — Claude rejects images whose bytes
+    // don't match the declared media type.
+    const mimeMatch = image.match(/^data:(image\/[\w.+-]+);base64,/i);
+    const mimeType = mimeMatch ? mimeMatch[1].toLowerCase() : 'image/png';
+    const base64Data = image.replace(/^data:image\/[\w.+-]+;base64,/i, '');
+
+    if (!base64Data) {
+      return res.status(400).json({ error: 'Image data is empty' });
+    }
+
+    const result = await parseImage(base64Data, mimeType, provider, apiKey);
     res.json(result);
   } catch (error) {
     console.error('Image parsing error:', error);
     res.status(500).json({ error: error.message });
   }
+});
+
+// Unknown API routes get a JSON 404 instead of falling through to the SPA
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
 
 // Serve static files in production

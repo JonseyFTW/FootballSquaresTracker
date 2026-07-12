@@ -4,13 +4,16 @@ A web application to track your football squares throughout a game and see what 
 
 ## Features
 
-- **Multiple Board Types**: Supports both 5x5 (25 squares with paired digits) and 10x10 (100 squares) grids
-- **Square Tracking**: Enter your square numbers to highlight them on the board
-- **Winning Combinations**: See all the score combinations that would result in a win for your squares
-- **Live Score Updates**: Update the game score and instantly see who's winning
-- **Visual Indicators**: Winning squares are highlighted with animations
-- **Square Management**: Click any square to assign an owner
-- **Prize Tracking**: Set up prize amounts for each quarter/half/final
+- **Three Board Types**:
+  - **10x10 Grid** — 100 squares, one digit per axis header
+  - **5x5 Grid** — 25 squares, two digits per axis header (4 winning combos per square)
+  - **10-Strip** — 10 squares, each covering 5 digits for one team and 2 for the other (10 winning combos per square). Digit assignments are generated so every possible score has exactly one winner, and can be edited per square afterwards.
+- **Import from a Photo**: Upload a screenshot or photo of a real squares board and an AI provider (Gemini, OpenAI, or Claude) extracts the teams, axis digits, owners, and prizes. Any digits the AI had to auto-correct are flagged for you to verify.
+- **Square Tracking**: Enter your square numbers to highlight them on the board — they're remembered per board on your device.
+- **Winning Combinations**: See all the score combinations that would result in a win for your squares, with realistic example scores.
+- **Live Score Updates**: Update the game score (quick +7/+3/+1 buttons) and instantly see who's winning.
+- **Period Results**: Record the winning square for each quarter/half/final alongside its prize amount, so payouts stay visible after the score moves on.
+- **Square Management**: Click any square to assign an owner (and edit digit coverage on strip boards).
 
 ## Quick Start with Docker
 
@@ -32,7 +35,26 @@ npm run dev
 
 # Server runs on http://localhost:3001
 # Client runs on http://localhost:5173
+
+# Run the test suite (game logic + import normalization)
+npm test
 ```
+
+## Configuration
+
+Copy `.env.example` to `.env`. All values are optional:
+
+| Variable | Purpose |
+|---|---|
+| `GEMINI_API_KEY` / `OPENAI_API_KEY` / `CLAUDE_API_KEY` | Enables image import with that provider (users can also paste a key in the UI) |
+| `PORT` | Server port, defaults to `3001` |
+| `POSTGRES_URL` | Store boards in Postgres instead of `server/data/boards.json` |
+
+## Deploying to Vercel
+
+The repo includes `vercel.json` and a serverless entry point (`api/index.js`) — import the repo into Vercel and deploy.
+
+**Important:** attach a Postgres database (Vercel Postgres/Neon) so `POSTGRES_URL` is set. Without it, boards are stored in memory and disappear on every cold start.
 
 ## How Football Squares Works
 
@@ -41,6 +63,7 @@ npm run dev
 3. **The Rule**: Winners are determined by the **last digit** of each team's score
 4. **5x5 Boards**: Each cell covers 2 digits, giving each square 4 winning combinations
 5. **10x10 Boards**: Each cell covers 1 digit, giving each square 1 winning combination
+6. **10-Strip Boards**: Each square covers 5 x-digits and 2 y-digits (10 combinations)
 
 ### Example
 - Score: Chiefs 17, 49ers 24
@@ -53,13 +76,18 @@ npm run dev
 - `GET /api/boards` - List all boards
 - `POST /api/boards` - Create a new board
 - `GET /api/boards/:id` - Get a specific board
-- `PUT /api/boards/:id/score` - Update game score
-- `PUT /api/boards/:id/squares/:num` - Update square owner
-- `GET /api/boards/:id/my-squares?squares=1,2,3` - Get winning combinations for specific squares
+- `PUT /api/boards/:id/score` - Update game score and phase
+- `PUT /api/boards/:id/squares` - Bulk-update square owners (and strip digits)
+- `PUT /api/boards/:id/squares/:num` - Update one square's owner (and strip digits)
+- `PUT /api/boards/:id/period-result` - Record/clear the winner snapshot for `q1|half|q3|final`
+- `GET /api/boards/:id/my-squares?squares=1,2,3` - Winning combinations + current winners for specific squares
 - `DELETE /api/boards/:id` - Delete a board
+- `GET /api/llm-providers` - Which AI providers have server-configured keys
+- `POST /api/parse-image` - Extract board data from an image via Gemini/OpenAI/Claude
 
 ## Tech Stack
 
 - **Frontend**: React 18 with Vite
 - **Backend**: Node.js with Express
+- **Storage**: JSON file (local/Docker) or Postgres (Vercel)
 - **Containerization**: Docker

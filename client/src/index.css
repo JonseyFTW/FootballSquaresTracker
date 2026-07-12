@@ -44,6 +44,13 @@ body {
   margin-top: 20px;
 }
 
+/* Grid items default to min-width auto and refuse to shrink below their
+   content, which would push the whole page wide on phones instead of
+   letting .grid-scroll scroll. */
+.board-container > * {
+  min-width: 0;
+}
+
 @media (max-width: 1024px) {
   .board-container {
     grid-template-columns: 1fr;
@@ -69,6 +76,12 @@ body {
   color: #f39c12;
   text-transform: uppercase;
   letter-spacing: 2px;
+}
+
+/* Lets wide grids scroll sideways on phones instead of crushing the cells */
+.grid-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .grid-with-y-label {
@@ -99,10 +112,12 @@ body {
 
 .squares-grid.grid-5x5 {
   grid-template-columns: 60px repeat(5, 1fr);
+  min-width: 420px;
 }
 
 .squares-grid.grid-10x10 {
   grid-template-columns: 40px repeat(10, 1fr);
+  min-width: 640px;
 }
 
 .grid-header {
@@ -154,6 +169,16 @@ body {
   background: #4a6fa1;
   transform: scale(1.02);
   z-index: 10;
+}
+
+.square.empty {
+  background: rgba(44, 62, 80, 0.5);
+  cursor: default;
+}
+
+.square.empty:hover {
+  background: rgba(44, 62, 80, 0.5);
+  transform: none;
 }
 
 .square.highlighted {
@@ -553,30 +578,83 @@ body {
   flex: 1;
 }
 
-/* Prizes Section */
-.prizes-display {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+/* Prizes & Period Results */
+.period-results {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
-.prize-item {
+.period-row {
   background: rgba(0, 0, 0, 0.2);
-  padding: 10px;
+  padding: 10px 12px;
   border-radius: 8px;
-  text-align: center;
 }
 
-.prize-item .period {
-  font-size: 0.75rem;
+.period-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.period-info .period {
+  font-size: 0.8rem;
   color: #8892b0;
-  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.prize-item .amount {
-  font-size: 1.1rem;
+.period-info .amount {
+  font-size: 1rem;
   font-weight: 700;
   color: #2ecc71;
+}
+
+.period-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.period-winner {
+  font-size: 0.85rem;
+  color: #fff;
+  word-break: break-word;
+}
+
+.period-winner.unrecorded {
+  color: #6c7a89;
+  font-style: italic;
+}
+
+.period-score {
+  color: #8892b0;
+  font-size: 0.8rem;
+}
+
+.btn-record {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-record:hover:not(:disabled) {
+  background: rgba(243, 156, 18, 0.25);
+  border-color: #f39c12;
+}
+
+.btn-record:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Nav */
@@ -1039,4 +1117,109 @@ body {
   padding: 8px;
   border-radius: 6px;
   margin-top: auto;
+}
+
+/* Winning banner in score display */
+.winning-banner {
+  margin-top: 15px;
+  color: #2ecc71;
+  font-weight: 600;
+}
+
+/* Track My Squares inline error */
+.track-error {
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.5);
+  color: #e74c3c;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 0.85rem;
+}
+
+/* Quick score buttons */
+.quick-score-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.quick-score-buttons button {
+  flex: 1;
+  padding: 5px 0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quick-score-buttons button:hover {
+  background: rgba(243, 156, 18, 0.25);
+  border-color: #f39c12;
+}
+
+/* Board card phase badge */
+.board-card .team-badge.phase {
+  background: rgba(46, 204, 113, 0.2);
+  color: #2ecc71;
+}
+
+/* Modal extras (strip digit editing) */
+.modal-label {
+  display: block;
+  font-size: 0.8rem;
+  color: #8892b0;
+  margin-bottom: 6px;
+}
+
+.modal-error {
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.5);
+  color: #e74c3c;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 0.85rem;
+}
+
+/* Import summary, warnings, and notices */
+.import-summary {
+  margin-bottom: 20px;
+}
+
+.import-summary .import-success {
+  margin-bottom: 0;
+}
+
+.import-warnings {
+  background: rgba(243, 156, 18, 0.12);
+  border: 1px solid rgba(243, 156, 18, 0.5);
+  border-radius: 8px;
+  padding: 12px 15px;
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: #f39c12;
+}
+
+.import-warnings ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.import-warnings li {
+  margin-bottom: 4px;
+}
+
+.import-notice {
+  background: rgba(52, 152, 219, 0.12);
+  border: 1px solid rgba(52, 152, 219, 0.5);
+  border-radius: 8px;
+  padding: 10px 15px;
+  margin-bottom: 15px;
+  font-size: 0.85rem;
+  color: #3498db;
 }
