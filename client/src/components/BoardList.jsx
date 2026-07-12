@@ -1,31 +1,29 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { apiFetch } from '../api'
+import { useAuth } from '../AuthContext'
 
 function BoardList() {
+  const { user, authLoading } = useAuth()
   const [boards, setBoards] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
+    // Wait for the auth token check so owners see their private boards
+    if (authLoading) return
     fetchBoards()
-  }, [])
+  }, [authLoading, user])
 
   const fetchBoards = async () => {
-    try {
-      const response = await fetch('/api/boards')
-      const data = await response.json().catch(() => null)
-      if (!response.ok || !Array.isArray(data)) {
-        setLoadError('Failed to load boards. Please try again.')
-        return
-      }
-      setBoards(data)
-    } catch (error) {
-      console.error('Error fetching boards:', error)
+    const { ok, data } = await apiFetch('/api/boards')
+    if (!ok || !Array.isArray(data)) {
       setLoadError('Failed to load boards. Please try again.')
-    } finally {
-      setLoading(false)
+    } else {
+      setBoards(data)
     }
+    setLoading(false)
   }
 
   const deleteBoard = async (e, id) => {
@@ -111,6 +109,7 @@ function BoardList() {
                   <span className="team-badge x-team">{board.xTeamName}</span>
                   <span className="team-badge y-team">{board.yTeamName}</span>
                   {inProgress && <span className="team-badge phase">{board.gamePhase}</span>}
+                  {board.leagueName && <span className="team-badge league">{board.leagueName}</span>}
                 </div>
               </div>
               <button

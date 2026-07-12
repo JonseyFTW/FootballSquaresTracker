@@ -1418,3 +1418,474 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* Account bar in header */
+.account-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 15px;
+  margin-top: 12px;
+}
+
+.account-name {
+  color: #8892b0;
+  font-size: 0.9rem;
+}
+
+.account-link {
+  background: none;
+  border: none;
+  color: #8892b0;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  padding: 0;
+  font-family: inherit;
+}
+
+.account-link:hover { color: #fff; }
+
+.account-link.accent { color: #f39c12; }
+
+/* Auth pages */
+.auth-card {
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.auth-switch {
+  margin-top: 20px;
+  text-align: center;
+  color: #8892b0;
+  font-size: 0.9rem;
+}
+
+.auth-switch a { color: #f39c12; }
+
+/* Viewer banner (share links) */
+.viewer-banner {
+  background: rgba(52, 152, 219, 0.12);
+  border: 1px solid rgba(52, 152, 219, 0.4);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+  color: #cdd6f4;
+}
+
+.viewer-banner a { color: #f39c12; }
+
+/* Board title row + league tag */
+.board-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin-bottom: 5px;
+}
+
+.board-league-tag {
+  color: #8892b0;
+  font-size: 0.85rem;
+  margin-bottom: 15px;
+}
+
+.board-card .team-badge.league {
+  background: rgba(155, 89, 182, 0.2);
+  color: #b985d6;
+}
+
+/* League pages */
+.league-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.league-header-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.league-columns {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+
+.league-columns > * { min-width: 0; }
+
+@media (max-width: 900px) {
+  .league-columns { grid-template-columns: 1fr; }
+}
+
+.league-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.league-game-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.league-game-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 12px 15px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.league-game-row:hover {
+  border-color: rgba(243, 156, 18, 0.6);
+  transform: translateY(-1px);
+}
+
+.league-game-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.league-game-name {
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.league-game-meta {
+  color: #8892b0;
+  font-size: 0.78rem;
+}
+
+.roster-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.roster-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 0.9rem;
+}
+
+.roster-remove {
+  background: none;
+  border: none;
+  color: #6c7a89;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 6px;
+}
+
+.roster-remove:hover { color: #e74c3c; }
+
+/* NFL picker on the create form */
+.nfl-picker {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  padding: 15px 18px;
+  margin: 15px 0 20px;
+}
+
+.nfl-picker h4 {
+  color: #f39c12;
+  margin-bottom: 6px;
+}
+
+/* Numbers mode selector */
+.numbers-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  margin-bottom: 5px;
+}
+
+.numbers-mode label {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: rgba(0, 0, 0, 0.2);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #8892b0;
+  transition: border-color 0.15s ease;
+}
+
+.numbers-mode label.selected {
+  border-color: #f39c12;
+  color: #cdd6f4;
+}
+
+.numbers-mode input[type="radio"] {
+  width: auto;
+  margin-top: 3px;
+  accent-color: #f39c12;
+}
+
+.numbers-mode strong { color: #fff; }
+
+/* Draw numbers */
+.draw-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  background: rgba(243, 156, 18, 0.1);
+  border: 1px solid rgba(243, 156, 18, 0.4);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 15px;
+  font-size: 0.9rem;
+  color: #f3d19c;
+}
+
+.draw-provenance {
+  margin-top: 12px;
+  color: #6c7a89;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.draw-animation {
+  text-align: center;
+  padding: 20px 0 10px;
+}
+
+.draw-run-label {
+  color: #8892b0;
+  margin-bottom: 15px;
+  font-size: 0.95rem;
+}
+
+.draw-axes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.draw-axes.final .digit {
+  background: rgba(46, 204, 113, 0.25);
+  color: #2ecc71;
+}
+
+.draw-axis-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.draw-axis-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-right: 6px;
+  min-width: 70px;
+  text-align: right;
+}
+
+.draw-axis-label.x { color: #f39c12; }
+.draw-axis-label.y { color: #3498db; }
+
+.draw-axis-row .digit {
+  min-width: 26px;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* Payments */
+.payment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.payment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.payment-row input[type="checkbox"] {
+  width: auto;
+  accent-color: #2ecc71;
+}
+
+.payment-row.paid .payment-name { color: #2ecc71; }
+
+.payment-name {
+  flex: 1;
+  color: #fff;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.payment-count {
+  color: #6c7a89;
+  font-size: 0.78rem;
+}
+
+.payment-owed {
+  color: #8892b0;
+  font-weight: 600;
+}
+
+.payment-totals {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.85rem;
+  color: #2ecc71;
+}
+
+.payment-totals .outstanding { color: #e74c3c; }
+
+/* Read-only squares */
+.square.no-edit, .strip-square.no-edit {
+  cursor: default;
+}
+
+.square.no-edit:hover {
+  background: #3d5a80;
+  transform: none;
+}
+
+.square.no-edit.highlighted:hover {
+  background: linear-gradient(135deg, #f39c12, #e74c3c);
+}
+
+.square.no-edit.winning:hover {
+  background: linear-gradient(135deg, #27ae60, #2ecc71);
+}
+
+.strip-square.no-edit:hover {
+  border-color: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Stat tiles (analytics) */
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-tile {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 12px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.stat-value .stat-sub {
+  font-size: 0.95rem;
+  color: #6c7a89;
+  font-weight: 600;
+}
+
+.stat-value.net-up { color: #2ecc71; }
+.stat-value.net-down { color: #e74c3c; }
+
+.stat-label {
+  font-size: 0.72rem;
+  color: #8892b0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Stats tables */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  min-width: 520px;
+}
+
+.stats-table th {
+  text-align: left;
+  color: #8892b0;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stats-table td {
+  padding: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  color: #fff;
+}
+
+.stats-table th.num, .stats-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-table .table-sub {
+  color: #6c7a89;
+  font-size: 0.78rem;
+}
+
+.stats-table tr.clickable { cursor: pointer; }
+.stats-table tr.clickable:hover td { background: rgba(255, 255, 255, 0.04); }

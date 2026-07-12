@@ -40,6 +40,14 @@ function generateStrip10Assignments() {
   return shuffle(blocks);
 }
 
+// League boards can exist before their numbers are drawn — no axes
+// means no square covers any digits yet.
+function boardHasAxes(board) {
+  if (board.type === 'strip-10') return true;
+  return Array.isArray(board.xAxis) && board.xAxis.length === 10 &&
+    Array.isArray(board.yAxis) && board.yAxis.length === 10;
+}
+
 // Resolve which last digits a square covers, for any board type.
 // Returns null for squares that lack the data needed to decide.
 function getSquareDigits(board, square) {
@@ -63,6 +71,7 @@ function getSquareDigits(board, square) {
 function findWinningSquares(board) {
   if (!board.currentScore) return [];
   if (board.gamePhase === 'pre-game') return [];
+  if (!boardHasAxes(board)) return [];
 
   const xLastDigit = board.currentScore.xTeam % 10;
   const yLastDigit = board.currentScore.yTeam % 10;
@@ -87,6 +96,7 @@ function checkCurrentWinners(board, userSquares) {
 // Every (x,y) digit combo the user's squares cover, with example scores.
 function calculateWinningScores(board, userSquares) {
   const winningCombinations = [];
+  if (!boardHasAxes(board)) return winningCombinations;
 
   for (const squareNum of userSquares) {
     const square = board.squares.find(s => s.number === squareNum);
@@ -131,6 +141,7 @@ function isValidAxisPermutation(axis) {
 module.exports = {
   shuffle,
   generateStrip10Assignments,
+  boardHasAxes,
   getSquareDigits,
   findWinningSquares,
   checkCurrentWinners,

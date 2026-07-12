@@ -1,0 +1,101 @@
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { apiFetch } from '../api'
+
+function Leagues() {
+  const navigate = useNavigate()
+  const [leagues, setLeagues] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const load = async () => {
+      const { ok, data } = await apiFetch('/api/leagues')
+      if (ok) setLeagues(data)
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  const createLeague = async (e) => {
+    e.preventDefault()
+    setError(null)
+    setCreating(true)
+    try {
+      const { ok, data } = await apiFetch('/api/leagues', {
+        method: 'POST',
+        body: JSON.stringify({ name, description })
+      })
+      if (!ok) {
+        setError(data.error || 'Failed to create league')
+        return
+      }
+      navigate(`/league/${data.id}`)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="loading"><div className="spinner"></div></div>
+  }
+
+  return (
+    <div className="leagues-page">
+      <div className="card" style={{ maxWidth: '700px', margin: '0 auto 20px' }}>
+        <h3>Start a League</h3>
+        <p className="live-hint">
+          Perfect for Facebook groups: create a league, add your players, spin up a squares
+          game for each NFL matchup, and share a view-only link with the group.
+        </p>
+        <form className="create-board-form" onSubmit={createLeague}>
+          <div className="form-group">
+            <label>League Name</label>
+            <input
+              type="text"
+              placeholder="e.g., Smithville Squares Club"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={80}
+              required
+            />
+          </div>
+          <div className="form-group">
+            <label>Description (optional)</label>
+            <input
+              type="text"
+              placeholder="e.g., Weekly squares for the neighborhood group"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={300}
+            />
+          </div>
+          {error && <div className="track-error">{error}</div>}
+          <button type="submit" className="btn btn-primary" disabled={creating}>
+            {creating ? 'Creating…' : 'Create League'}
+          </button>
+        </form>
+      </div>
+
+      {leagues.length > 0 && (
+        <div className="board-list" style={{ maxWidth: '700px', margin: '0 auto' }}>
+          {leagues.map(league => (
+            <div key={league.id} className="board-card" onClick={() => navigate(`/league/${league.id}`)}>
+              <h3>{league.name}</h3>
+              {league.description && <p>{league.description}</p>}
+              <p style={{ marginTop: '6px' }}>
+                {(league.members || []).length} member{(league.members || []).length === 1 ? '' : 's'} ·
+                created {new Date(league.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default Leagues
