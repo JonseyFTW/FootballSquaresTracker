@@ -211,6 +211,56 @@ async function parseWithOpenAI(imageBase64, mimeType, apiKey) {
   return parseJsonResponse(text);
 }
 
+// OpenRouter (OpenAI-compatible) — routes to any vision-capable model
+// the operator or user picks, e.g. "google/gemini-2.5-flash-lite",
+// "anthropic/claude-sonnet-5", "openai/gpt-4o-mini".
+const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite';
+
+async function parseWithOpenRouter(imageBase64, mimeType, apiKey, model) {
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': process.env.APP_URL || 'https://squareszn.com',
+      'X-Title': 'SquareSZN'
+    },
+    body: JSON.stringify({
+      model: model || DEFAULT_OPENROUTER_MODEL,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: EXTRACTION_PROMPT
+          },
+          {
+            type: 'image_url',
+            image_url: {
+              url: `data:${mimeType};base64,${imageBase64}`
+            }
+          }
+        ]
+      }]
+    })
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`OpenRouter API error: ${error}`);
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content;
+
+  if (!text) {
+    throw new Error(`No response from OpenRouter (model: ${model || DEFAULT_OPENROUTER_MODEL})`);
+  }
+
+  return parseJsonResponse(text);
+}
+
 // Parse JSON from LLM response (handles markdown code blocks)
 function parseJsonResponse(text) {
   // Remove markdown code blocks if present
@@ -397,7 +447,7 @@ function normalizeAxis(axis, label = 'Axis', warnings = []) {
 }
 
 // Main export - parse image with specified provider
-async function parseImage(imageBase64, mimeType, provider, apiKey) {
+async function parseImage(imageBase64, mimeType, provider, apiKey, options = {}) {
   switch (provider.toLowerCase()) {
     case 'gemini':
       return parseWithGemini(imageBase64, mimeType, apiKey);
@@ -405,9 +455,17 @@ async function parseImage(imageBase64, mimeType, provider, apiKey) {
       return parseWithClaude(imageBase64, mimeType, apiKey);
     case 'openai':
       return parseWithOpenAI(imageBase64, mimeType, apiKey);
+    case 'openrouter':
+      return parseWithOpenRouter(imageBase64, mimeType, apiKey, options.model);
     default:
-      throw new Error(`Unknown provider: ${provider}. Use 'gemini', 'claude', or 'openai'`);
+      throw new Error(`Unknown provider: ${provider}. Use 'gemini', 'claude', 'openai', or 'openrouter'`);
   }
 }
 
-module.exports = { parseImage, parseJsonResponse, validateAndNormalize, normalizeAxis };
+module.exports = {
+  parseImage,
+  parseJsonResponse,
+  validateAndNormalize,
+  normalizeAxis,
+  DEFAULT_OPENROUTER_MODEL
+};

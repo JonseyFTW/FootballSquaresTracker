@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api'
+import { useTitle } from '../useTitle'
 
 function Leagues() {
   const navigate = useNavigate()
@@ -10,6 +11,7 @@ function Leagues() {
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState(null)
+  useTitle('My Leagues')
 
   useEffect(() => {
     const load = async () => {

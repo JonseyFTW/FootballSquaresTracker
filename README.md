@@ -1,6 +1,10 @@
-# Football Squares Tracker
+# SquareSZN — Football Squares Tracker
 
-A web application to track your football squares throughout a game and see what scores you need to win.
+Live at **[squareszn.com](https://squareszn.com)**.
+
+A web application to run football squares pools: create boards, draw numbers fairly, track payments, share view-only boards with your group, and watch every square update with live NFL scores.
+
+New visitors get a marketing landing page at `/`; the app itself lives at `/boards` and friends. SEO is handled with static meta/Open Graph/Twitter tags, JSON-LD structured data, a generated `og-image.png`, and `robots.txt` + `sitemap.xml` (all under `client/public/` and `client/index.html`).
 
 ## Features
 
@@ -55,6 +59,9 @@ Copy `.env.example` to `.env`. All values are optional:
 | Variable | Purpose |
 |---|---|
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` / `CLAUDE_API_KEY` | Enables image import with that provider (users can also paste a key in the UI) |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | Image import through [OpenRouter](https://openrouter.ai) — one key, any vision model; users can name a model per-import |
+| `RESEND_API_KEY` / `EMAIL_FROM` | Password-reset emails via [Resend](https://resend.com). Unset = reset links are logged to the server console |
+| `APP_URL` | Public origin for reset links; defaults to the request host |
 | `PORT` | Server port, defaults to `3001` |
 | `POSTGRES_URL` | Store data in Postgres instead of `server/data/*.json` |
 | `AUTH_SECRET` | Signs login tokens (recommended in production; rotating it signs everyone out). Falls back to a secret derived from `POSTGRES_URL`, or a locally persisted one in dev |
@@ -100,6 +107,7 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) �
 - `PUT /api/boards/:id/draw-axes` - Draw grid numbers: `{runs: N}` randomizes N times (history kept) or `{mode: "manual", xAxis, yAxis}`
 - `PUT /api/boards/:id/payments` - Mark an owner name paid/unpaid (`{name, paid}`)
 - `POST /api/auth/register` / `POST /api/auth/login` / `GET /api/me` - Accounts (scrypt + signed bearer tokens)
+- `POST /api/auth/forgot` / `POST /api/auth/reset` - Password reset (30-min single-use links; emailed via Resend or logged server-side)
 - `POST /api/leagues`, `GET /api/leagues`, `GET/PUT/DELETE /api/leagues/:id` - Leagues (owner only)
 - `POST /api/leagues/:id/members`, `DELETE /api/leagues/:id/members/:memberId` - Roster
 - `GET /api/league-share/:token` - Public read-only league page

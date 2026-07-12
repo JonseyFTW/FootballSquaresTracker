@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import ImageImport from './ImageImport'
 import { apiFetch } from '../api'
+import { useTitle } from '../useTitle'
 
 function CreateBoard() {
   const navigate = useNavigate()
@@ -9,6 +10,7 @@ function CreateBoard() {
   const leagueId = new URLSearchParams(location.search).get('league')
 
   const [league, setLeague] = useState(null)
+  useTitle('Create a Board')
   const [boardType, setBoardType] = useState('10x10')
   const [name, setName] = useState('')
   const [xTeamName, setXTeamName] = useState('')

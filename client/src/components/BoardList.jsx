@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
+import { useTitle } from '../useTitle'
 
 function BoardList() {
   const { user, authLoading } = useAuth()
@@ -9,6 +10,7 @@ function BoardList() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
   const navigate = useNavigate()
+  useTitle('My Boards')
 
   useEffect(() => {
     // Wait for the auth token check so owners see their private boards

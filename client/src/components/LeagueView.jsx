@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../api'
+import { useTitle } from '../useTitle'
 
 function LeagueView() {
   const { id } = useParams()
@@ -11,6 +12,7 @@ function LeagueView() {
   const [memberName, setMemberName] = useState('')
   const [memberError, setMemberError] = useState(null)
   const [copied, setCopied] = useState(false)
+  useTitle(league ? league.name : 'League')
 
   useEffect(() => {
     const load = async () => {

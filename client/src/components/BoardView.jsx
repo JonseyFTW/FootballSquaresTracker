@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
+import { useTitle } from '../useTitle'
 
 const PERIODS = [
   { key: 'q1', label: '1st Quarter' },
@@ -72,6 +73,8 @@ function BoardView({ shareMode = false }) {
   const boardApi = shareMode ? `/api/share/${token}` : `/api/boards/${id}`
   const canEdit = !shareMode && !!board?.canEdit
   const storageKey = board ? `fst-my-squares-${board.id}` : null
+
+  useTitle(board ? (shareMode ? `Watch live: ${board.name}` : board.name) : null)
 
   useEffect(() => {
     // Reset everything when navigating between boards
@@ -542,7 +545,7 @@ function BoardView({ shareMode = false }) {
       <div className="empty-state">
         <h2>Board Not Available</h2>
         <p>{loadError || "The board you're looking for doesn't exist."}</p>
-        <Link to="/" className="btn btn-primary">Back to Boards</Link>
+        <Link to="/boards" className="btn btn-primary">Back to Boards</Link>
       </div>
     )
   }
@@ -688,7 +691,7 @@ function BoardView({ shareMode = false }) {
 
       {!shareMode && (
         <div style={{ marginBottom: '20px' }}>
-          <Link to={board.leagueId && canEdit ? `/league/${board.leagueId}` : '/'} className="btn btn-secondary">
+          <Link to={board.leagueId && canEdit ? `/league/${board.leagueId}` : '/boards'} className="btn btn-secondary">
             ← {board.leagueId && canEdit ? board.leagueName || 'League' : 'Back to Boards'}
           </Link>
         </div>

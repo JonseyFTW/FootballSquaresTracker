@@ -10,6 +10,8 @@ function ImageImport({ onImportComplete }) {
   const [showApiKey, setShowApiKey] = useState(false)
   const [configuredProviders, setConfiguredProviders] = useState([])
   const [useServerKeys, setUseServerKeys] = useState(false)
+  const [orModel, setOrModel] = useState(localStorage.getItem('openrouterModel') || '')
+  const [orDefaultModel, setOrDefaultModel] = useState('google/gemini-2.5-flash-lite')
   const fileInputRef = useRef(null)
 
   // Check for server-configured providers on mount
@@ -18,6 +20,9 @@ function ImageImport({ onImportComplete }) {
       try {
         const response = await fetch('/api/llm-providers')
         const data = await response.json()
+        if (data.openrouterDefaultModel) {
+          setOrDefaultModel(data.openrouterDefaultModel)
+        }
         if (data.hasConfiguredProviders) {
           setConfiguredProviders(data.providers)
           setUseServerKeys(true)
@@ -117,6 +122,10 @@ function ImageImport({ onImportComplete }) {
       if (!useServerKeys) {
         body.apiKey = apiKey
       }
+      // OpenRouter can route to any vision model the user names
+      if (provider === 'openrouter' && orModel.trim()) {
+        body.model = orModel.trim()
+      }
 
       const response = await fetch('/api/parse-image', {
         method: 'POST',
@@ -152,6 +161,7 @@ function ImageImport({ onImportComplete }) {
       case 'gemini': return 'Google Gemini'
       case 'claude': return 'Anthropic Claude'
       case 'openai': return 'OpenAI'
+      case 'openrouter': return 'OpenRouter'
       default: return p
     }
   }
@@ -161,9 +171,31 @@ function ImageImport({ onImportComplete }) {
       case 'gemini': return 'Enter your Google AI API key'
       case 'claude': return 'Enter your Anthropic API key'
       case 'openai': return 'Enter your OpenAI API key'
+      case 'openrouter': return 'Enter your OpenRouter API key'
       default: return 'Enter API key'
     }
   }
+
+  const handleOrModelChange = (value) => {
+    setOrModel(value)
+    localStorage.setItem('openrouterModel', value)
+  }
+
+  const openrouterModelField = provider === 'openrouter' && (
+    <div className="form-group">
+      <label>Model (any OpenRouter vision model)</label>
+      <input
+        type="text"
+        value={orModel}
+        onChange={(e) => handleOrModelChange(e.target.value)}
+        placeholder={orDefaultModel}
+      />
+      <small className="api-key-hint">
+        Leave blank for the default ({orDefaultModel}). Browse models at openrouter.ai/models —
+        e.g. anthropic/claude-sonnet-5, openai/gpt-4o-mini.
+      </small>
+    </div>
+  )
 
   return (
     <div className="image-import">
@@ -186,6 +218,7 @@ function ImageImport({ onImportComplete }) {
             <small className="api-key-hint configured">
               API key configured in .env file
             </small>
+            {openrouterModelField}
           </div>
         ) : (
           /* Manual API key entry */
@@ -196,8 +229,11 @@ function ImageImport({ onImportComplete }) {
                 <option value="gemini">Google Gemini (Cheapest)</option>
                 <option value="openai">OpenAI GPT-4o-mini</option>
                 <option value="claude">Anthropic Claude</option>
+                <option value="openrouter">OpenRouter (any model)</option>
               </select>
             </div>
+
+            {openrouterModelField}
 
             <div className="form-group">
               <label>API Key for {getProviderLabel(provider)}</label>

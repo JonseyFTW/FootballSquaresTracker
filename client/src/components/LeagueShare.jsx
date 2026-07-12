@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
+import { useTitle } from '../useTitle'
 
 // Public league page reached via share link — view-only.
 function LeagueShare() {
@@ -10,6 +11,7 @@ function LeagueShare() {
   const { user } = useAuth()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  useTitle(data ? data.league.name : 'League')
 
   useEffect(() => {
     const load = async () => {

@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
+import { useTitle } from '../useTitle'
 
 function AuthPage({ mode }) {
   const { login, register } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const isRegister = mode === 'register'
+  useTitle(isRegister ? 'Create Account' : 'Sign In')
 
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
@@ -14,7 +16,7 @@ function AuthPage({ mode }) {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
 
-  const nextPath = new URLSearchParams(location.search).get('next') || '/'
+  const nextPath = new URLSearchParams(location.search).get('next') || '/boards'
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -80,6 +82,12 @@ function AuthPage({ mode }) {
             required
           />
         </div>
+
+        {!isRegister && (
+          <p className="auth-forgot">
+            <Link to="/forgot">Forgot password?</Link>
+          </p>
+        )}
 
         {error && <div className="track-error">{error}</div>}
 

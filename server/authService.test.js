@@ -5,6 +5,9 @@ const {
   verifyPassword,
   signToken,
   verifyToken,
+  signResetToken,
+  verifyResetToken,
+  passwordVersion,
   normalizeEmail,
   isValidEmail,
   publicUser
@@ -50,6 +53,38 @@ test('tampered and malformed tokens are rejected', () => {
 test('expired tokens are rejected', () => {
   const token = signToken('user-123', -1); // expired a day ago
   assert.strictEqual(verifyToken(token), null);
+});
+
+test('reset tokens round-trip and carry the password fingerprint', () => {
+  const hash = hashPassword('original-password');
+  const token = signResetToken('user-9', hash);
+  const payload = verifyResetToken(token);
+  assert.strictEqual(payload.userId, 'user-9');
+  assert.strictEqual(payload.pwv, passwordVersion(hash));
+});
+
+test('reset tokens cannot be used as session tokens (and vice versa)', () => {
+  const resetToken = signResetToken('user-9', hashPassword('pw12345678'));
+  assert.strictEqual(verifyToken(resetToken), null, 'reset token must not sign a user in');
+
+  const sessionToken = signToken('user-9');
+  assert.strictEqual(verifyResetToken(sessionToken), null, 'session token must not reset a password');
+});
+
+test('changing the password invalidates outstanding reset tokens', () => {
+  const oldHash = hashPassword('old-password-1');
+  const token = signResetToken('user-9', oldHash);
+  const payload = verifyResetToken(token);
+
+  const newHash = hashPassword('new-password-2');
+  // The route compares the token pwv with the CURRENT hash's version
+  assert.notStrictEqual(payload.pwv, passwordVersion(newHash));
+  assert.strictEqual(payload.pwv, passwordVersion(oldHash));
+});
+
+test('expired reset tokens are rejected', () => {
+  const token = signResetToken('user-9', hashPassword('pw12345678'), -1);
+  assert.strictEqual(verifyResetToken(token), null);
 });
 
 test('email helpers', () => {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
+import { useTitle } from '../useTitle'
 
 const money = (n) => `$${(Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 
@@ -10,6 +11,7 @@ function Analytics() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  useTitle('My Stats')
 
   useEffect(() => {
     const load = async () => {
@@ -43,7 +45,7 @@ function Analytics() {
           Open any board (or a shared board link) and use <strong>Track My Squares</strong> —
           your games, wins, and winnings will build up here.
         </p>
-        <Link to="/" className="btn btn-primary">Browse Boards</Link>
+        <Link to="/boards" className="btn btn-primary">Browse Boards</Link>
       </div>
     )
   }

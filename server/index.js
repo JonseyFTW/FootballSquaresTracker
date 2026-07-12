@@ -3,10 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { parseImage } = require('./llmService');
+const { parseImage, DEFAULT_OPENROUTER_MODEL } = require('./llmService');
 const { getScoreboard, getGame, applyGameToBoard } = require('./nflService');
 const storage = require('./storage');
 const auth = require('./authService');
+const { sendPasswordResetEmail } = require('./emailService');
 const { computeAnalytics } = require('./analyticsService');
 const {
   shuffle,
@@ -22,11 +23,14 @@ const {
 const API_KEYS = {
   gemini: process.env.GEMINI_API_KEY,
   openai: process.env.OPENAI_API_KEY,
-  claude: process.env.CLAUDE_API_KEY
+  claude: process.env.CLAUDE_API_KEY,
+  openrouter: process.env.OPENROUTER_API_KEY
 };
 
 const BOARD_TYPES = ['5x5', '10x10', 'strip-10'];
-const LLM_PROVIDERS = ['gemini', 'openai', 'claude'];
+const LLM_PROVIDERS = ['gemini', 'openai', 'claude', 'openrouter'];
+// OpenRouter model ids look like "vendor/model-name[:variant]"
+const OPENROUTER_MODEL_RE = /^[\w.\-\/:]{1,100}$/;
 const PERIODS = ['q1', 'half', 'q3', 'final'];
 const MAX_OWNER_LENGTH = 60;
 const MAX_PHASE_LENGTH = 30;
@@ -189,6 +193,85 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/me', requireAuth, (req, res) => {
   res.json({ user: auth.publicUser(req.user) });
+});
+
+// Request a password reset link. The response never reveals whether an
+// account exists for the email.
+app.post('/api/auth/forgot', async (req, res) => {
+  const generic = { message: 'If an account exists for that email, a reset link is on its way.' };
+  try {
+    const email = auth.normalizeEmail(req.body.email);
+    if (!auth.isValidEmail(email)) {
+      return res.json(generic);
+    }
+
+    const user = await storage.getUserByEmail(email);
+    if (!user) {
+      return res.json(generic);
+    }
+
+    // Per-account cooldown so this endpoint can't flood a mailbox
+    const now = Date.now();
+    if (user.lastResetRequestAt && now - new Date(user.lastResetRequestAt).getTime() < 60 * 1000) {
+      return res.json(generic);
+    }
+    user.lastResetRequestAt = new Date(now).toISOString();
+    await storage.saveUser(user);
+
+    const token = auth.signResetToken(user.id, user.passwordHash);
+    const origin = process.env.APP_URL ||
+      `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+    const resetUrl = `${origin}/reset?token=${encodeURIComponent(token)}`;
+
+    try {
+      const result = await sendPasswordResetEmail(user.email, resetUrl);
+      if (!result.sent) {
+        // No email provider configured — surface the link in server logs
+        // so the operator can hand it to the user manually.
+        console.log(`[password-reset] Email not configured. Link for ${user.email}: ${resetUrl}`);
+      }
+    } catch (err) {
+      console.error('Failed to send reset email:', err.message);
+      console.log(`[password-reset] Link for ${user.email}: ${resetUrl}`);
+    }
+
+    res.json(generic);
+  } catch (error) {
+    console.error('Error handling forgot-password:', error);
+    res.json(generic);
+  }
+});
+
+// Complete a reset: token + new password. Signs the user in on success.
+app.post('/api/auth/reset', async (req, res) => {
+  try {
+    const { token } = req.body;
+    const password = String(req.body.password || '');
+
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    }
+
+    const invalid = () => res.status(400).json({
+      error: 'This reset link is invalid, expired, or already used. Request a new one.'
+    });
+
+    const payload = auth.verifyResetToken(token);
+    if (!payload) return invalid();
+
+    const user = await storage.getUserById(payload.userId);
+    // pwv binds the token to the password it was issued against, so a
+    // completed reset (or any password change) kills outstanding links
+    if (!user || auth.passwordVersion(user.passwordHash) !== payload.pwv) return invalid();
+
+    user.passwordHash = auth.hashPassword(password);
+    await storage.saveUser(user);
+
+    res.json({ token: auth.signToken(user.id), user: auth.publicUser(user) });
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
 });
 
 // Save/update the squares a user is tracking on a board (their "entry"
@@ -1041,13 +1124,16 @@ app.get('/api/llm-providers', (req, res) => {
   if (API_KEYS.claude) {
     providers.push({ id: 'claude', name: 'Anthropic Claude', configured: true });
   }
+  if (API_KEYS.openrouter) {
+    providers.push({ id: 'openrouter', name: 'OpenRouter (any model)', configured: true, defaultModel: DEFAULT_OPENROUTER_MODEL });
+  }
 
-  res.json({ providers, hasConfiguredProviders: providers.length > 0 });
+  res.json({ providers, hasConfiguredProviders: providers.length > 0, openrouterDefaultModel: DEFAULT_OPENROUTER_MODEL });
 });
 
 app.post('/api/parse-image', async (req, res) => {
   try {
-    const { image, provider, apiKey: clientApiKey } = req.body;
+    const { image, provider, apiKey: clientApiKey, model } = req.body;
 
     if (!image || typeof image !== 'string') {
       return res.status(400).json({ error: 'No image provided' });
@@ -1073,7 +1159,16 @@ app.post('/api/parse-image', async (req, res) => {
       return res.status(400).json({ error: 'Image data is empty' });
     }
 
-    const result = await parseImage(base64Data, mimeType, provider, apiKey);
+    // Model override is an OpenRouter feature — pick any vision model
+    let modelOverride;
+    if (provider === 'openrouter' && model !== undefined) {
+      if (typeof model !== 'string' || !OPENROUTER_MODEL_RE.test(model)) {
+        return res.status(400).json({ error: 'Invalid model id — use the OpenRouter format, e.g. google/gemini-2.5-flash-lite' });
+      }
+      modelOverride = model;
+    }
+
+    const result = await parseImage(base64Data, mimeType, provider, apiKey, { model: modelOverride });
     res.json(result);
   } catch (error) {
     console.error('Image parsing error:', error);

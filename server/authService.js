@@ -78,17 +78,13 @@ function b64url(buf) {
   return Buffer.from(buf).toString('base64url');
 }
 
-function signToken(userId, ttlDays = TOKEN_TTL_DAYS) {
-  const payload = JSON.stringify({
-    uid: userId,
-    exp: Date.now() + ttlDays * 24 * 60 * 60 * 1000
-  });
-  const body = b64url(payload);
+function signPayload(payload) {
+  const body = b64url(JSON.stringify(payload));
   const sig = crypto.createHmac('sha256', getAuthSecret()).update(body).digest('base64url');
   return `${body}.${sig}`;
 }
 
-function verifyToken(token) {
+function verifyPayload(token) {
   try {
     const [body, sig] = String(token).split('.');
     if (!body || !sig) return null;
@@ -97,11 +93,51 @@ function verifyToken(token) {
     const expectedBuf = Buffer.from(expected);
     if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
-    if (!payload.uid || !payload.exp || Date.now() > payload.exp) return null;
-    return { userId: payload.uid };
+    if (!payload.exp || Date.now() > payload.exp) return null;
+    return payload;
   } catch (err) {
     return null;
   }
+}
+
+function signToken(userId, ttlDays = TOKEN_TTL_DAYS) {
+  return signPayload({
+    uid: userId,
+    exp: Date.now() + ttlDays * 24 * 60 * 60 * 1000
+  });
+}
+
+function verifyToken(token) {
+  const payload = verifyPayload(token);
+  // Session tokens carry no purpose — anything with one (e.g. a reset
+  // token) must never be usable to sign in.
+  if (!payload || !payload.uid || payload.purpose) return null;
+  return { userId: payload.uid };
+}
+
+// ---------------------------------------------------------------
+// Password reset tokens: signed, 30-minute expiry, and bound to a
+// fingerprint of the CURRENT password hash — changing the password
+// (by reset or otherwise) invalidates every outstanding token, which
+// makes them effectively single-use with no extra storage.
+// ---------------------------------------------------------------
+function passwordVersion(passwordHash) {
+  return crypto.createHash('sha256').update(String(passwordHash)).digest('hex').slice(0, 12);
+}
+
+function signResetToken(userId, passwordHash, ttlMinutes = 30) {
+  return signPayload({
+    uid: userId,
+    purpose: 'pwreset',
+    pwv: passwordVersion(passwordHash),
+    exp: Date.now() + ttlMinutes * 60 * 1000
+  });
+}
+
+function verifyResetToken(token) {
+  const payload = verifyPayload(token);
+  if (!payload || payload.purpose !== 'pwreset' || !payload.uid || !payload.pwv) return null;
+  return { userId: payload.uid, pwv: payload.pwv };
 }
 
 function normalizeEmail(email) {
@@ -125,6 +161,9 @@ module.exports = {
   verifyPassword,
   signToken,
   verifyToken,
+  signResetToken,
+  verifyResetToken,
+  passwordVersion,
   normalizeEmail,
   isValidEmail,
   publicUser

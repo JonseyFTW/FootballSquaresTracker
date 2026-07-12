@@ -53,8 +53,14 @@ export function AuthProvider({ children }) {
     setUser(null)
   }
 
+  // Install a session issued outside login/register (e.g. password reset)
+  const adoptSession = (token, newUser) => {
+    setToken(token)
+    setUser(newUser)
+  }
+
   return (
-    <AuthContext.Provider value={{ user, authLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, authLoading, login, register, logout, adoptSession }}>
       {children}
     </AuthContext.Provider>
   )
