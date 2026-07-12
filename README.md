@@ -1,4 +1,6 @@
-# Football Squares Tracker
+# SquareSZN — Football Squares Tracker
+
+Live at **[squareszn.com](https://squareszn.com)**.
 
 A web application to run football squares pools: create boards, draw numbers fairly, track payments, share view-only boards with your group, and watch every square update with live NFL scores.
 

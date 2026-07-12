@@ -222,8 +222,8 @@ async function parseWithOpenRouter(imageBase64, mimeType, apiKey, model) {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': process.env.APP_URL || 'https://football-squares-tracker.vercel.app',
-      'X-Title': 'Football Squares Tracker'
+      'HTTP-Referer': process.env.APP_URL || 'https://squareszn.com',
+      'X-Title': 'SquareSZN'
     },
     body: JSON.stringify({
       model: model || DEFAULT_OPENROUTER_MODEL,

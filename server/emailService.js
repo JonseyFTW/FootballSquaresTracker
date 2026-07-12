@@ -13,8 +13,8 @@ async function sendPasswordResetEmail(to, resetUrl) {
 
   // Without a verified domain, Resend only delivers from its sandbox
   // sender (and only to the account owner). Set EMAIL_FROM once the
-  // domain is verified, e.g. "Football Squares <no-reply@yourdomain.com>".
-  const from = process.env.EMAIL_FROM || 'Football Squares <onboarding@resend.dev>';
+  // domain is verified, e.g. "SquareSZN <no-reply@squareszn.com>".
+  const from = process.env.EMAIL_FROM || 'SquareSZN <onboarding@resend.dev>';
 
   const response = await fetch(RESEND_URL, {
     method: 'POST',
@@ -25,7 +25,7 @@ async function sendPasswordResetEmail(to, resetUrl) {
     body: JSON.stringify({
       from,
       to: [to],
-      subject: 'Reset your Football Squares password',
+      subject: 'Reset your SquareSZN password',
       html: `
         <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#111">
           <h2 style="margin:0 0 14px">Reset your password</h2>

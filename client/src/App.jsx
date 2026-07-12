@@ -32,7 +32,7 @@ function App() {
       <header className="topbar">
         <Link to={user ? '/boards' : '/'} className="logo">
           <span className="logo-mark">🏈</span>
-          <span className="logo-word">Football Squares <em>Tracker</em></span>
+          <span className="logo-word">Square<em>SZN</em></span>
         </Link>
 
         <nav className="nav">
@@ -97,7 +97,7 @@ function App() {
       </main>
 
       <footer className="site-footer">
-        <span className="footer-brand">🏈 Football Squares Tracker</span>
+        <span className="footer-brand">🏈 SquareSZN — squareszn.com</span>
         <nav className="footer-links">
           <Link to="/create">Create a board</Link>
           <Link to="/boards">Boards</Link>

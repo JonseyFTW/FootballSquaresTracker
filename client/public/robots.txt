@@ -5,4 +5,4 @@ Disallow: /share/
 Disallow: /league/
 Disallow: /me
 
-Sitemap: https://football-squares-tracker.vercel.app/sitemap.xml
+Sitemap: https://squareszn.com/sitemap.xml
