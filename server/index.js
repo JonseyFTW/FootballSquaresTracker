@@ -528,8 +528,9 @@ app.get('/api/boards/:id', async (req, res) => {
   }
 });
 
-// Create new board
-app.post('/api/boards', async (req, res) => {
+// Create new board — requires an account; viewing stays open via
+// share links and the public board list
+app.post('/api/boards', requireAuth, async (req, res) => {
   try {
     const {
       name, type, xTeamName, yTeamName, xAxis, yAxis, prizes,
@@ -556,9 +557,6 @@ app.post('/api/boards', async (req, res) => {
     // League attachment requires owning the league
     let league = null;
     if (leagueId) {
-      if (!req.user) {
-        return res.status(401).json({ error: 'Sign in required to create league games' });
-      }
       league = await storage.getLeagueById(leagueId);
       if (!league || league.ownerId !== req.user.id) {
         return res.status(403).json({ error: 'Only the league owner can add games to it' });
@@ -632,7 +630,7 @@ app.post('/api/boards', async (req, res) => {
       newBoard.drawLog = { mode: 'manual', runs: 0, drawnAt: newBoard.createdAt };
     }
 
-    if (req.user) newBoard.ownerId = req.user.id;
+    newBoard.ownerId = req.user.id;
     if (league) {
       newBoard.leagueId = league.id;
       newBoard.leagueName = league.name;

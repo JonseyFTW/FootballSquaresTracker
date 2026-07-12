@@ -77,9 +77,9 @@ function Landing() {
           </p>
           <div className="hero-ctas">
             <Link to="/register" className="btn btn-primary btn-lg">Start Free</Link>
-            <Link to="/create" className="btn btn-secondary btn-lg">Try it — no account needed</Link>
+            <Link to="/boards" className="btn btn-secondary btn-lg">See a live board</Link>
           </div>
-          <p className="hero-trust">Free · Works on any phone · Live scores via ESPN</p>
+          <p className="hero-trust">Free to play and watch · Works on any phone · Live scores via ESPN</p>
         </div>
 
         <div className="hero-visual" aria-hidden="true">
