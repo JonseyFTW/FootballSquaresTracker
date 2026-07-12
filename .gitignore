@@ -6,3 +6,6 @@ server/data/*.json
 *.log
 .DS_Store
 .vercel
+
+# All local runtime data (boards, users, leagues, auth secret)
+server/data/

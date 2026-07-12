@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { apiFetch } from '../api'
+import { useAuth } from '../AuthContext'
 
 const PERIODS = [
   { key: 'q1', label: '1st Quarter' },
@@ -15,10 +17,13 @@ const parseDigitList = (input) =>
   [...new Set(input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 0 && n <= 9))]
     .sort((a, b) => a - b)
 
-function BoardView() {
-  const { id } = useParams()
+// shareMode: reached via /share/:token — read-only, uses share endpoints
+function BoardView({ shareMode = false }) {
+  const { id, token } = useParams()
+  const { user } = useAuth()
   const [board, setBoard] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [mySquares, setMySquares] = useState('')
   const [mySquareNumbers, setMySquareNumbers] = useState([])
   const [trackError, setTrackError] = useState(null)
@@ -33,6 +38,8 @@ function BoardView() {
   const [scoreY, setScoreY] = useState('0')
   const [gamePhase, setGamePhase] = useState('pre-game')
   const [recordingPeriod, setRecordingPeriod] = useState(null)
+  const [leagueMembers, setLeagueMembers] = useState([])
+  const [copied, setCopied] = useState(false)
 
   // Live NFL game sync
   const [showLinkModal, setShowLinkModal] = useState(false)
@@ -46,25 +53,39 @@ function BoardView() {
   const [syncing, setSyncing] = useState(false)
   const [liveError, setLiveError] = useState(null)
 
+  // Number drawing
+  const [showDrawModal, setShowDrawModal] = useState(false)
+  const [drawRuns, setDrawRuns] = useState('3')
+  const [drawMode, setDrawMode] = useState('randomize') // 'randomize' | 'manual'
+  const [manualX, setManualX] = useState(Array(10).fill(''))
+  const [manualY, setManualY] = useState(Array(10).fill(''))
+  const [drawing, setDrawing] = useState(false)
+  const [drawError, setDrawError] = useState(null)
+  const [drawPreview, setDrawPreview] = useState(null) // { runNumber, xAxis, yAxis, final }
+
   // Refs so timers and async callbacks always see current values
   const boardRef = useRef(null)
   const mySquaresRef = useRef([])
   useEffect(() => { boardRef.current = board }, [board])
   useEffect(() => { mySquaresRef.current = mySquareNumbers }, [mySquareNumbers])
 
-  const storageKey = `fst-my-squares-${id}`
+  const boardApi = shareMode ? `/api/share/${token}` : `/api/boards/${id}`
+  const canEdit = !shareMode && !!board?.canEdit
+  const storageKey = board ? `fst-my-squares-${board.id}` : null
 
   useEffect(() => {
     // Reset everything when navigating between boards
     setLoading(true)
+    setLoadError(null)
     setBoard(null)
     setMySquares('')
     setMySquareNumbers([])
     setWinningCombinations([])
     setCurrentWinners([])
     setTrackError(null)
+    setLeagueMembers([])
     fetchBoard()
-  }, [id])
+  }, [id, token])
 
   useEffect(() => {
     if (board) {
@@ -74,33 +95,91 @@ function BoardView() {
     }
   }, [board])
 
+  const restoreTracking = async (loadedBoard) => {
+    // Prefer squares saved to the account, fall back to this device
+    let saved = null
+    if (user) {
+      const { ok, data } = await apiFetch('/api/me/tracked')
+      if (ok) {
+        const entry = (data.trackedGames || []).find(t => t.boardId === loadedBoard.id)
+        if (entry) saved = entry.squares.join(', ')
+      }
+    }
+    if (!saved) {
+      saved = localStorage.getItem(`fst-my-squares-${loadedBoard.id}`)
+    }
+    if (saved) {
+      setMySquares(saved)
+      trackSquares(saved, loadedBoard)
+    }
+  }
+
   const fetchBoard = async () => {
     try {
-      const response = await fetch(`/api/boards/${id}`)
-      if (!response.ok) {
+      const { ok, status, data } = await apiFetch(boardApi)
+      if (!ok) {
         setBoard(null)
+        setLoadError(status === 403
+          ? (data.error || 'This board is private.')
+          : (data.error || 'Board not found'))
         return
       }
-      const data = await response.json()
       setBoard(data)
+      restoreTracking(data)
 
-      // Restore tracked squares from the last visit
-      const saved = localStorage.getItem(storageKey)
-      if (saved) {
-        setMySquares(saved)
-        trackSquares(saved)
+      // Owners of league boards get roster autocomplete
+      if (data.leagueId && data.canEdit && !shareMode) {
+        const league = await apiFetch(`/api/leagues/${data.leagueId}`)
+        if (league.ok) setLeagueMembers(league.data.members || [])
       }
 
-      // Linked boards should show the real score immediately, not the
-      // score from whenever the board was last synced
+      // Linked boards should show the real score immediately
       if (data.liveGame && data.liveGame.lastSync?.state !== 'post') {
         syncLiveScore(false)
       }
-    } catch (error) {
-      console.error('Error fetching board:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const trackSquares = async (input, boardOverride = null) => {
+    const activeBoard = boardOverride || boardRef.current || board
+    if (!activeBoard) return
+
+    const squareNums = parseSquareNumbers(input)
+    setMySquareNumbers(squareNums)
+    setTrackError(null)
+
+    const key = `fst-my-squares-${activeBoard.id}`
+
+    if (squareNums.length === 0) {
+      setWinningCombinations([])
+      setCurrentWinners([])
+      localStorage.removeItem(key)
+      if (user && !shareMode) {
+        apiFetch('/api/me/tracked', { method: 'PUT', body: JSON.stringify({ boardId: activeBoard.id, squares: [] }) })
+      }
+      if (input.trim()) {
+        setTrackError('Enter square numbers separated by commas, e.g. 1, 5, 12')
+      }
+      return
+    }
+
+    localStorage.setItem(key, squareNums.join(', '))
+    if (user) {
+      apiFetch('/api/me/tracked', { method: 'PUT', body: JSON.stringify({ boardId: activeBoard.id, squares: squareNums }) })
+    }
+
+    const url = shareMode
+      ? `/api/share/${token}/my-squares?squares=${squareNums.join(',')}`
+      : `/api/boards/${id}/my-squares?squares=${squareNums.join(',')}`
+    const { ok, data } = await apiFetch(url)
+    if (!ok) {
+      setTrackError(data.error || 'Failed to look up your squares')
+      return
+    }
+    setWinningCombinations(data.winningCombinations || [])
+    setCurrentWinners(data.currentWinners || [])
   }
 
   // ----- Live NFL score sync -----
@@ -108,9 +187,9 @@ function BoardView() {
   const syncLiveScore = async (manual = false) => {
     setSyncing(true)
     try {
-      const response = await fetch(`/api/boards/${id}/sync-live`, { method: 'POST' })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
+      const url = shareMode ? `/api/share/${token}/sync-live` : `/api/boards/${id}/sync-live`
+      const { ok, data } = await apiFetch(url, { method: 'POST' })
+      if (!ok) {
         if (manual) setLiveError(data.error || 'Failed to sync live score')
         return
       }
@@ -121,18 +200,13 @@ function BoardView() {
         prev?.currentScore?.yTeam !== data.board.currentScore.yTeam
       setBoard(data.board)
       if (scoreChanged && mySquaresRef.current.length > 0) {
-        trackSquares(mySquaresRef.current.join(','))
+        trackSquares(mySquaresRef.current.join(','), data.board)
       }
-    } catch (error) {
-      console.error('Error syncing live score:', error)
-      if (manual) setLiveError('Failed to sync live score')
     } finally {
       setSyncing(false)
     }
   }
 
-  // Poll while linked: every 30s during the game, every 2 min pre-game,
-  // never once it's final. Each board update reschedules the next tick.
   useEffect(() => {
     if (!board?.liveGame) return
     const state = board.liveGame.lastSync?.state
@@ -154,7 +228,6 @@ function BoardView() {
   const guessSide = (game) => {
     if (matchesTeam(game.home, board?.xTeamName)) return 'home'
     if (matchesTeam(game.away, board?.xTeamName)) return 'away'
-    // Try the y-team: if it matches home, x must be away
     if (matchesTeam(game.home, board?.yTeamName)) return 'away'
     if (matchesTeam(game.away, board?.yTeamName)) return 'home'
     return 'home'
@@ -163,26 +236,18 @@ function BoardView() {
   const loadGames = async (dateValue) => {
     setGamesLoading(true)
     setGamesError(null)
-    try {
-      const dates = (dateValue || '').replaceAll('-', '')
-      const response = await fetch(`/api/nfl/scoreboard${dates ? `?dates=${dates}` : ''}`)
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setLiveGames([])
-        setGamesError(data.error || 'Failed to load NFL games')
-        return
-      }
+    const dates = (dateValue || '').replaceAll('-', '')
+    const { ok, data } = await apiFetch(`/api/nfl/scoreboard${dates ? `?dates=${dates}` : ''}`)
+    if (!ok) {
+      setLiveGames([])
+      setGamesError(data.error || 'Failed to load NFL games')
+    } else {
       setLiveGames(data.games || [])
       if ((data.games || []).length === 0) {
         setGamesError('No NFL games found for this date — try another date.')
       }
-    } catch (error) {
-      console.error('Error loading NFL games:', error)
-      setLiveGames([])
-      setGamesError('Failed to load NFL games')
-    } finally {
-      setGamesLoading(false)
     }
+    setGamesLoading(false)
   }
 
   const openLinkModal = () => {
@@ -202,13 +267,11 @@ function BoardView() {
     if (!game) return
     setLinking(true)
     try {
-      const response = await fetch(`/api/boards/${id}/live-game`, {
+      const { ok, data } = await apiFetch(`/api/boards/${id}/live-game`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eventId: game.id, xTeamSide: selectedSide })
       })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
+      if (!ok) {
         setGamesError(data.error || 'Failed to link game')
         return
       }
@@ -216,11 +279,8 @@ function BoardView() {
       setShowLinkModal(false)
       setLiveError(null)
       if (mySquaresRef.current.length > 0) {
-        trackSquares(mySquaresRef.current.join(','))
+        trackSquares(mySquaresRef.current.join(','), data)
       }
-    } catch (error) {
-      console.error('Error linking game:', error)
-      setGamesError('Failed to link game')
     } finally {
       setLinking(false)
     }
@@ -228,75 +288,125 @@ function BoardView() {
 
   const unlinkGame = async () => {
     if (!confirm('Unlink this board from the live game? The score stays but stops updating.')) return
+    const { ok, data } = await apiFetch(`/api/boards/${id}/live-game`, {
+      method: 'PUT',
+      body: JSON.stringify({ clear: true })
+    })
+    if (ok) setBoard(data)
+  }
+
+  // ----- Number drawing -----
+
+  const randomizeManualAxis = (setter) => {
+    const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    for (let i = digits.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [digits[i], digits[j]] = [digits[j], digits[i]]
+    }
+    setter(digits.map(String))
+  }
+
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+  const runDraw = async () => {
+    setDrawError(null)
+    setDrawing(true)
     try {
-      const response = await fetch(`/api/boards/${id}/live-game`, {
+      let body
+      if (drawMode === 'manual') {
+        body = { mode: 'manual', xAxis: manualX.map(Number), yAxis: manualY.map(Number) }
+      } else {
+        body = { runs: parseInt(drawRuns, 10) || 1 }
+      }
+
+      const { ok, data } = await apiFetch(`/api/boards/${id}/draw-axes`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clear: true })
+        body: JSON.stringify(body)
       })
-      if (!response.ok) return
-      const data = await response.json()
+      if (!ok) {
+        setDrawError(data.error || 'Failed to draw numbers')
+        return
+      }
+
+      // Animate through each randomization run so the group can see the
+      // draw "spin" before it lands on the final numbers
+      const history = data.drawLog?.history || []
+      if (history.length > 0) {
+        for (let i = 0; i < history.length; i++) {
+          setDrawPreview({ runNumber: i + 1, total: history.length, ...history[i], final: i === history.length - 1 })
+          await sleep(i === history.length - 1 ? 900 : 550)
+        }
+      }
+
       setBoard(data)
-    } catch (error) {
-      console.error('Error unlinking game:', error)
+      setShowDrawModal(false)
+      setDrawPreview(null)
+      if (mySquaresRef.current.length > 0) {
+        trackSquares(mySquaresRef.current.join(','), data)
+      }
+    } finally {
+      setDrawing(false)
     }
   }
 
-  const trackSquares = async (input) => {
-    const squareNums = parseSquareNumbers(input)
-    setMySquareNumbers(squareNums)
-    setTrackError(null)
+  // ----- Payments -----
 
-    if (squareNums.length === 0) {
-      setWinningCombinations([])
-      setCurrentWinners([])
-      localStorage.removeItem(storageKey)
-      if (input.trim()) {
-        setTrackError('Enter square numbers separated by commas, e.g. 1, 5, 12')
-      }
-      return
+  const paymentRows = useMemo(() => {
+    if (!board) return []
+    const byName = new Map()
+    for (const square of board.squares || []) {
+      const owner = (square.owner || '').trim()
+      if (!owner) continue
+      const key = owner.toLowerCase()
+      if (!byName.has(key)) byName.set(key, { name: owner, count: 0 })
+      byName.get(key).count++
     }
+    const price = Number(board.squarePrice) || 0
+    return [...byName.entries()]
+      .map(([key, row]) => ({
+        key,
+        name: row.name,
+        count: row.count,
+        owed: row.count * price,
+        paid: !!board.payments?.[key]?.paid
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [board])
 
-    localStorage.setItem(storageKey, squareNums.join(', '))
+  const togglePaid = async (row) => {
+    const { ok, data } = await apiFetch(`/api/boards/${id}/payments`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: row.name, paid: !row.paid })
+    })
+    if (ok) setBoard(data)
+  }
 
+  // ----- Owner tools -----
+
+  const shareUrl = board?.shareToken ? `${window.location.origin}/share/${board.shareToken}` : null
+
+  const copyShareLink = async () => {
+    if (!shareUrl) return
     try {
-      const response = await fetch(`/api/boards/${id}/my-squares?squares=${squareNums.join(',')}`)
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setTrackError(data.error || 'Failed to look up your squares')
-        return
-      }
-      setWinningCombinations(data.winningCombinations || [])
-      setCurrentWinners(data.currentWinners || [])
-    } catch (error) {
-      console.error('Error tracking squares:', error)
-      setTrackError('Failed to look up your squares')
+      await navigator.clipboard.writeText(shareUrl)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      prompt('Copy this link:', shareUrl)
     }
   }
 
   const updateScore = async () => {
     const x = parseInt(scoreX, 10)
     const y = parseInt(scoreY, 10)
-
-    try {
-      const response = await fetch(`/api/boards/${id}/score`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ xTeam: isNaN(x) ? 0 : x, yTeam: isNaN(y) ? 0 : y, gamePhase })
-      })
-      if (!response.ok) {
-        console.error('Error updating score: server returned', response.status)
-        return
-      }
-      const data = await response.json()
-      setBoard(data)
-
-      // Re-check winning status if tracking squares
-      if (mySquareNumbers.length > 0) {
-        trackSquares(mySquareNumbers.join(','))
-      }
-    } catch (error) {
-      console.error('Error updating score:', error)
+    const { ok, data } = await apiFetch(`/api/boards/${id}/score`, {
+      method: 'PUT',
+      body: JSON.stringify({ xTeam: isNaN(x) ? 0 : x, yTeam: isNaN(y) ? 0 : y, gamePhase })
+    })
+    if (!ok) return
+    setBoard(data)
+    if (mySquareNumbers.length > 0) {
+      trackSquares(mySquareNumbers.join(','), data)
     }
   }
 
@@ -306,6 +416,7 @@ function BoardView() {
   }
 
   const openSquareEditor = (square) => {
+    if (!canEdit) return
     setEditingSquare(square.number)
     setEditOwnerValue(square.owner || '')
     setEditError(null)
@@ -338,27 +449,18 @@ function BoardView() {
       body.yDigits = yDigits
     }
 
-    try {
-      const response = await fetch(`/api/boards/${id}/squares/${editingSquare}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setEditError(data.error || 'Failed to save square')
-        return
-      }
-      setBoard(data)
-      closeSquareEditor()
-
-      // Owner names appear in tracked-square results; refresh them
-      if (mySquareNumbers.length > 0) {
-        trackSquares(mySquareNumbers.join(','))
-      }
-    } catch (error) {
-      console.error('Error updating square:', error)
-      setEditError('Failed to save square')
+    const { ok, data } = await apiFetch(`/api/boards/${id}/squares/${editingSquare}`, {
+      method: 'PUT',
+      body: JSON.stringify(body)
+    })
+    if (!ok) {
+      setEditError(data.error || 'Failed to save square')
+      return
+    }
+    setBoard(data)
+    closeSquareEditor()
+    if (mySquareNumbers.length > 0) {
+      trackSquares(mySquareNumbers.join(','), data)
     }
   }
 
@@ -368,29 +470,25 @@ function BoardView() {
 
     setRecordingPeriod(period.key)
     try {
-      const response = await fetch(`/api/boards/${id}/period-result`, {
+      const { ok, data } = await apiFetch(`/api/boards/${id}/period-result`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ period: period.key })
       })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok) {
+      if (!ok) {
         alert(data.error || 'Failed to record result')
         return
       }
       setBoard(data)
-    } catch (error) {
-      console.error('Error recording period result:', error)
     } finally {
       setRecordingPeriod(null)
     }
   }
 
-  // All squares winning at the current score (legacy strip boards can
-  // have more than one)
+  // All squares winning at the current score
   const winningSquares = useMemo(() => {
     if (!board || !board.currentScore) return []
     if (board.gamePhase === 'pre-game') return []
+    if (board.type !== 'strip-10' && (board.xAxis || []).length !== 10) return []
 
     const xLastDigit = board.currentScore.xTeam % 10
     const yLastDigit = board.currentScore.yTeam % 10
@@ -400,7 +498,6 @@ function BoardView() {
       let xDigits, yDigits
 
       if (board.type === 'strip-10') {
-        // Strip-10: digits stored directly on square
         xDigits = square.xDigits || []
         yDigits = square.yDigits || []
       } else if (board.type === '5x5') {
@@ -423,7 +520,6 @@ function BoardView() {
     return winners
   }, [board])
 
-  // Build a lookup map for O(1) square access by position (must be before early returns - Rules of Hooks)
   const squaresByPos = useMemo(() => {
     if (!board || board.type === 'strip-10') return {}
     const map = {}
@@ -444,8 +540,8 @@ function BoardView() {
   if (!board) {
     return (
       <div className="empty-state">
-        <h2>Board Not Found</h2>
-        <p>The board you're looking for doesn't exist.</p>
+        <h2>Board Not Available</h2>
+        <p>{loadError || "The board you're looking for doesn't exist."}</p>
         <Link to="/" className="btn btn-primary">Back to Boards</Link>
       </div>
     )
@@ -453,13 +549,14 @@ function BoardView() {
 
   const gridSize = board.type === '5x5' ? 5 : 10
   const isPreGame = board.gamePhase === 'pre-game'
+  const axesDrawn = board.type === 'strip-10' || (board.xAxis || []).length === 10
+  const memberNames = leagueMembers.map(m => m.name)
 
   const winnerLabel = (num) => {
     const sq = board.squares.find(s => s.number === num)
     return `#${num}${sq?.owner ? ` (${sq.owner})` : ''}`
   }
 
-  // Render strip-10 layout
   const renderStripGrid = () => {
     return (
       <div className="strip-grid">
@@ -470,7 +567,7 @@ function BoardView() {
           return (
             <div
               key={`square-${square.number}`}
-              className={`strip-square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''}`}
+              className={`strip-square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''} ${canEdit ? '' : 'no-edit'}`}
               onClick={() => openSquareEditor(square)}
             >
               <div className="strip-square-header">
@@ -498,8 +595,8 @@ function BoardView() {
 
   const renderGrid = () => {
     const rows = []
+    const digitOrQ = (value) => value === undefined || value === null ? '?' : value
 
-    // Header row with X-axis numbers
     const headerRow = [
       <div key="corner" className="grid-header corner"></div>
     ]
@@ -508,41 +605,38 @@ function BoardView() {
       if (board.type === '5x5') {
         headerRow.push(
           <div key={`header-${col}`} className="grid-header x-header">
-            <span className="digit">{board.xAxis[col * 2]}</span>
-            <span className="digit">{board.xAxis[col * 2 + 1]}</span>
+            <span className="digit">{digitOrQ(board.xAxis[col * 2])}</span>
+            <span className="digit">{digitOrQ(board.xAxis[col * 2 + 1])}</span>
           </div>
         )
       } else {
         headerRow.push(
           <div key={`header-${col}`} className="grid-header x-header">
-            <span className="digit">{board.xAxis[col]}</span>
+            <span className="digit">{digitOrQ(board.xAxis[col])}</span>
           </div>
         )
       }
     }
     rows.push(headerRow)
 
-    // Data rows
     for (let row = 0; row < gridSize; row++) {
       const rowCells = []
 
-      // Y-axis header
       if (board.type === '5x5') {
         rowCells.push(
           <div key={`y-header-${row}`} className="grid-header y-header">
-            <span className="digit">{board.yAxis[row * 2]}</span>
-            <span className="digit">{board.yAxis[row * 2 + 1]}</span>
+            <span className="digit">{digitOrQ(board.yAxis[row * 2])}</span>
+            <span className="digit">{digitOrQ(board.yAxis[row * 2 + 1])}</span>
           </div>
         )
       } else {
         rowCells.push(
           <div key={`y-header-${row}`} className="grid-header y-header">
-            <span className="digit">{board.yAxis[row]}</span>
+            <span className="digit">{digitOrQ(board.yAxis[row])}</span>
           </div>
         )
       }
 
-      // Squares
       for (let col = 0; col < gridSize; col++) {
         const square = squaresByPos[`${row}-${col}`]
         if (!square) {
@@ -556,7 +650,7 @@ function BoardView() {
         rowCells.push(
           <div
             key={`square-${square.number}`}
-            className={`square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''}`}
+            className={`square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''} ${canEdit ? '' : 'no-edit'}`}
             onClick={() => openSquareEditor(square)}
           >
             <span className="square-number">{square.number}</span>
@@ -575,13 +669,40 @@ function BoardView() {
     ))
   }
 
+  const drawLogLine = board.drawLog && axesDrawn && board.type !== 'strip-10' ? (
+    board.drawLog.mode === 'randomized'
+      ? `Numbers drawn on-site with ${board.drawLog.runs} randomization${board.drawLog.runs === 1 ? '' : 's'} · ${new Date(board.drawLog.drawnAt).toLocaleString()}`
+      : null
+  ) : null
+
   return (
     <div>
-      <div style={{ marginBottom: '20px' }}>
-        <Link to="/" className="btn btn-secondary">← Back to Boards</Link>
-      </div>
+      {shareMode && (
+        <div className="viewer-banner">
+          👀 You're watching this board live (view-only).
+          {!user && (
+            <span> Playing in this game? <Link to="/register">Create a free account</Link> to track your squares and stats.</span>
+          )}
+        </div>
+      )}
 
-      <h2 style={{ marginBottom: '20px', fontSize: '1.8rem' }}>{board.name}</h2>
+      {!shareMode && (
+        <div style={{ marginBottom: '20px' }}>
+          <Link to={board.leagueId && canEdit ? `/league/${board.leagueId}` : '/'} className="btn btn-secondary">
+            ← {board.leagueId && canEdit ? board.leagueName || 'League' : 'Back to Boards'}
+          </Link>
+        </div>
+      )}
+
+      <div className="board-title-row">
+        <h2 style={{ fontSize: '1.8rem' }}>{board.name}</h2>
+        {canEdit && shareUrl && (
+          <button className="btn btn-secondary btn-small" onClick={copyShareLink}>
+            {copied ? '✓ Copied!' : '🔗 Copy Share Link'}
+          </button>
+        )}
+      </div>
+      {board.leagueName && <p className="board-league-tag">{board.leagueName}</p>}
 
       <div className="score-display">
         <div className="score-board">
@@ -612,6 +733,19 @@ function BoardView() {
         )}
       </div>
 
+      {!axesDrawn && (
+        <div className="draw-banner">
+          <span>
+            🎲 Numbers haven't been drawn yet — squares get claimed first, then the columns and rows are randomized.
+          </span>
+          {canEdit && isPreGame && (
+            <button className="btn btn-primary btn-small" onClick={() => { setShowDrawModal(true); setDrawError(null) }}>
+              Draw Numbers
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="board-container">
         {board.type === 'strip-10' ? (
           <div className="strip-wrapper">
@@ -635,6 +769,7 @@ function BoardView() {
                 </div>
               </div>
             </div>
+            {drawLogLine && <p className="draw-provenance">🎲 {drawLogLine}</p>}
           </div>
         )}
 
@@ -654,6 +789,9 @@ function BoardView() {
                 Track
               </button>
             </div>
+            {user && (
+              <p className="live-hint" style={{ marginTop: '-5px' }}>Saved to your account for your stats page.</p>
+            )}
 
             {trackError && (
               <div className="track-error">{trackError}</div>
@@ -695,6 +833,9 @@ function BoardView() {
                 ))}
               </div>
             )}
+            {!axesDrawn && mySquareNumbers.length > 0 && (
+              <p className="live-hint">Winning combos appear once the numbers are drawn.</p>
+            )}
           </div>
 
           {/* Live NFL Score Sync */}
@@ -718,10 +859,12 @@ function BoardView() {
                   <button className="btn btn-secondary" onClick={() => syncLiveScore(true)} disabled={syncing}>
                     {syncing ? 'Syncing…' : 'Sync Now'}
                   </button>
-                  <button className="btn btn-secondary" onClick={unlinkGame}>Unlink</button>
+                  {canEdit && (
+                    <button className="btn btn-secondary" onClick={unlinkGame}>Unlink</button>
+                  )}
                 </div>
               </>
-            ) : (
+            ) : canEdit ? (
               <>
                 <p className="live-hint">
                   Link this board to a real NFL game and the score and quarter update automatically from ESPN.
@@ -730,65 +873,103 @@ function BoardView() {
                   Link NFL Game
                 </button>
               </>
+            ) : (
+              <p className="live-hint">Not linked to a live game.</p>
             )}
           </div>
 
-          {/* Score Controls */}
-          <div className="card">
-            <h3>Update Score</h3>
-            {board.liveGame && (
-              <p className="live-hint" style={{ marginBottom: '10px' }}>
-                This board is linked to a live game — manual changes will be overwritten on the next sync.
-              </p>
-            )}
-            <div className="score-controls">
-              <div className="score-input-group">
-                <label>{board.xTeamName}</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={scoreX}
-                  onChange={(e) => setScoreX(e.target.value)}
-                />
-                <div className="quick-score-buttons">
-                  <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 7)}>+7</button>
-                  <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 3)}>+3</button>
-                  <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 1)}>+1</button>
+          {/* Score Controls (owner only) */}
+          {canEdit && (
+            <div className="card">
+              <h3>Update Score</h3>
+              {board.liveGame && (
+                <p className="live-hint" style={{ marginBottom: '10px' }}>
+                  This board is linked to a live game — manual changes will be overwritten on the next sync.
+                </p>
+              )}
+              <div className="score-controls">
+                <div className="score-input-group">
+                  <label>{board.xTeamName}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={scoreX}
+                    onChange={(e) => setScoreX(e.target.value)}
+                  />
+                  <div className="quick-score-buttons">
+                    <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 7)}>+7</button>
+                    <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 3)}>+3</button>
+                    <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 1)}>+1</button>
+                  </div>
+                </div>
+                <div className="score-input-group">
+                  <label>{board.yTeamName}</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={scoreY}
+                    onChange={(e) => setScoreY(e.target.value)}
+                  />
+                  <div className="quick-score-buttons">
+                    <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 7)}>+7</button>
+                    <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 3)}>+3</button>
+                    <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 1)}>+1</button>
+                  </div>
                 </div>
               </div>
-              <div className="score-input-group">
-                <label>{board.yTeamName}</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={scoreY}
-                  onChange={(e) => setScoreY(e.target.value)}
-                />
-                <div className="quick-score-buttons">
-                  <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 7)}>+7</button>
-                  <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 3)}>+3</button>
-                  <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 1)}>+1</button>
-                </div>
-              </div>
+              <select
+                className="phase-select"
+                value={gamePhase}
+                onChange={(e) => setGamePhase(e.target.value)}
+              >
+                <option value="pre-game">Pre-Game</option>
+                <option value="1st Quarter">1st Quarter</option>
+                <option value="2nd Quarter">2nd Quarter</option>
+                <option value="Halftime">Halftime</option>
+                <option value="3rd Quarter">3rd Quarter</option>
+                <option value="4th Quarter">4th Quarter</option>
+                <option value="Overtime">Overtime</option>
+                <option value="Final">Final</option>
+              </select>
+              <button className="btn btn-primary" style={{ width: '100%' }} onClick={updateScore}>
+                Update Score
+              </button>
             </div>
-            <select
-              className="phase-select"
-              value={gamePhase}
-              onChange={(e) => setGamePhase(e.target.value)}
-            >
-              <option value="pre-game">Pre-Game</option>
-              <option value="1st Quarter">1st Quarter</option>
-              <option value="2nd Quarter">2nd Quarter</option>
-              <option value="Halftime">Halftime</option>
-              <option value="3rd Quarter">3rd Quarter</option>
-              <option value="4th Quarter">4th Quarter</option>
-              <option value="Overtime">Overtime</option>
-              <option value="Final">Final</option>
-            </select>
-            <button className="btn btn-primary" style={{ width: '100%' }} onClick={updateScore}>
-              Update Score
-            </button>
-          </div>
+          )}
+
+          {/* Payments (owner only) */}
+          {canEdit && paymentRows.length > 0 && (
+            <div className="card">
+              <h3>Payments</h3>
+              {Number(board.squarePrice) > 0 && (
+                <p className="live-hint">${board.squarePrice} per square</p>
+              )}
+              <div className="payment-list">
+                {paymentRows.map(row => (
+                  <label key={row.key} className={`payment-row ${row.paid ? 'paid' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={row.paid}
+                      onChange={() => togglePaid(row)}
+                    />
+                    <span className="payment-name">
+                      {row.name}
+                      <span className="payment-count"> · {row.count} sq</span>
+                    </span>
+                    {Number(board.squarePrice) > 0 && (
+                      <span className="payment-owed">${row.owed}</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+              {Number(board.squarePrice) > 0 && (
+                <div className="payment-totals">
+                  <span>Collected: ${paymentRows.filter(r => r.paid).reduce((s, r) => s + r.owed, 0)}</span>
+                  <span className="outstanding">Outstanding: ${paymentRows.filter(r => !r.paid).reduce((s, r) => s + r.owed, 0)}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Prizes & Period Results */}
           <div className="card">
@@ -818,17 +999,19 @@ function BoardView() {
                       ) : (
                         <span className="period-winner unrecorded">Not recorded</span>
                       )}
-                      <button
-                        type="button"
-                        className="btn-record"
-                        disabled={isPreGame || recordingPeriod === period.key}
-                        title={isPreGame
-                          ? 'Update the score and game phase first'
-                          : (result ? 'Re-record with the current score' : 'Record the current score as this result')}
-                        onClick={() => recordPeriodResult(period)}
-                      >
-                        {result ? '↻' : 'Record'}
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          className="btn-record"
+                          disabled={isPreGame || recordingPeriod === period.key}
+                          title={isPreGame
+                            ? 'Update the score and game phase first'
+                            : (result ? 'Re-record with the current score' : 'Record the current score as this result')}
+                          onClick={() => recordPeriodResult(period)}
+                        >
+                          {result ? '↻' : 'Record'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )
@@ -837,6 +1020,123 @@ function BoardView() {
           </div>
         </div>
       </div>
+
+      {/* Draw Numbers Modal */}
+      {showDrawModal && (
+        <div className="modal-overlay" onClick={() => !drawing && setShowDrawModal(false)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>Draw the Numbers</h3>
+
+            {drawPreview ? (
+              <div className="draw-animation">
+                <p className="draw-run-label">
+                  {drawPreview.final ? '🔒 Final draw!' : `Randomization ${drawPreview.runNumber} of ${drawPreview.total}…`}
+                </p>
+                <div className={`draw-axes ${drawPreview.final ? 'final' : ''}`}>
+                  <div className="draw-axis-row">
+                    <span className="draw-axis-label x">{board.xTeamName}</span>
+                    {drawPreview.xAxis.map((d, i) => <span key={i} className="digit">{d}</span>)}
+                  </div>
+                  <div className="draw-axis-row">
+                    <span className="draw-axis-label y">{board.yTeamName}</span>
+                    {drawPreview.yAxis.map((d, i) => <span key={i} className="digit">{d}</span>)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="numbers-mode">
+                  <label className={drawMode === 'randomize' ? 'selected' : ''}>
+                    <input
+                      type="radio"
+                      name="draw-mode"
+                      checked={drawMode === 'randomize'}
+                      onChange={() => setDrawMode('randomize')}
+                    />
+                    <span><strong>Randomize on site</strong> — pick how many times to shuffle; every run is saved so the group can see the draw was fair.</span>
+                  </label>
+                  <label className={drawMode === 'manual' ? 'selected' : ''}>
+                    <input
+                      type="radio"
+                      name="draw-mode"
+                      checked={drawMode === 'manual'}
+                      onChange={() => setDrawMode('manual')}
+                    />
+                    <span><strong>Enter manually</strong> — you already drew numbers elsewhere (e.g. a wheel or generator).</span>
+                  </label>
+                </div>
+
+                {drawMode === 'randomize' ? (
+                  <div className="form-group" style={{ marginBottom: '15px' }}>
+                    <label>How many randomizations? (final one counts)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="25"
+                      value={drawRuns}
+                      onChange={(e) => setDrawRuns(e.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div className="axis-input-group" style={{ marginTop: '10px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ color: '#f39c12' }}>{board.xTeamName} (top)</label>
+                        <button type="button" className="btn btn-secondary btn-small" onClick={() => randomizeManualAxis(setManualX)}>Randomize</button>
+                      </div>
+                      <div className="axis-digits">
+                        {manualX.map((digit, idx) => (
+                          <input
+                            key={`mx-${idx}`}
+                            type="number"
+                            min="0"
+                            max="9"
+                            value={digit}
+                            onChange={(e) => {
+                              const next = [...manualX]; next[idx] = e.target.value; setManualX(next)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="axis-input-group" style={{ marginTop: '10px', marginBottom: '15px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <label style={{ color: '#3498db' }}>{board.yTeamName} (left)</label>
+                        <button type="button" className="btn btn-secondary btn-small" onClick={() => randomizeManualAxis(setManualY)}>Randomize</button>
+                      </div>
+                      <div className="axis-digits">
+                        {manualY.map((digit, idx) => (
+                          <input
+                            key={`my-${idx}`}
+                            type="number"
+                            min="0"
+                            max="9"
+                            value={digit}
+                            onChange={(e) => {
+                              const next = [...manualY]; next[idx] = e.target.value; setManualY(next)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {drawError && <div className="track-error">{drawError}</div>}
+
+                <div className="modal-actions">
+                  <button className="btn btn-secondary" onClick={() => setShowDrawModal(false)} disabled={drawing}>
+                    Cancel
+                  </button>
+                  <button className="btn btn-primary" onClick={runDraw} disabled={drawing}>
+                    {drawing ? 'Drawing…' : (drawMode === 'randomize' ? '🎲 Run the Draw' : 'Save Numbers')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Link Live Game Modal */}
       {showLinkModal && (() => {
@@ -936,8 +1236,14 @@ function BoardView() {
               value={editOwnerValue}
               onChange={(e) => setEditOwnerValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && updateSquare()}
+              list={memberNames.length > 0 ? 'league-members' : undefined}
               autoFocus
             />
+            {memberNames.length > 0 && (
+              <datalist id="league-members">
+                {memberNames.map(name => <option key={name} value={name} />)}
+              </datalist>
+            )}
             {board.type === 'strip-10' && (
               <>
                 <label className="modal-label">{board.xTeamName} digits (usually 5)</label>

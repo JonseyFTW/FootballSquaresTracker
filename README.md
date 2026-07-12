@@ -4,6 +4,13 @@ A web application to track your football squares throughout a game and see what 
 
 ## Features
 
+- **Leagues for Groups** (e.g. Facebook groups): create an account, start a league, and run all your group's squares games in one place.
+  - **Member roster** — add your players once; names autocomplete when assigning squares
+  - **NFL week picker** — creating a game lists every matchup that week (Thursday/Sunday/Monday); pick one and team names + live scores hook up automatically
+  - **Draw numbers on-site** — squares get claimed first, then run the randomizer, choosing how many times it shuffles; every run is stored and shown so the group can see the draw was fair. Or enter numbers drawn elsewhere.
+  - **Payment tracking** — set a price per square and check off who's paid; collected/outstanding totals update live
+  - **Share links** — post a view-only link to the league or any board; viewers watch live but can't change anything (only the league owner can)
+  - **Player accounts & stats** — viewers can optionally create an account, track their squares across games, and get a lifetime analytics page (games, wins, win rate, winnings, net)
 - **Three Board Types**:
   - **10x10 Grid** — 100 squares, one digit per axis header
   - **5x5 Grid** — 25 squares, two digits per axis header (4 winning combos per square)
@@ -49,7 +56,8 @@ Copy `.env.example` to `.env`. All values are optional:
 |---|---|
 | `GEMINI_API_KEY` / `OPENAI_API_KEY` / `CLAUDE_API_KEY` | Enables image import with that provider (users can also paste a key in the UI) |
 | `PORT` | Server port, defaults to `3001` |
-| `POSTGRES_URL` | Store boards in Postgres instead of `server/data/boards.json` |
+| `POSTGRES_URL` | Store data in Postgres instead of `server/data/*.json` |
+| `AUTH_SECRET` | Signs login tokens (recommended in production; rotating it signs everyone out). Falls back to a secret derived from `POSTGRES_URL`, or a locally persisted one in dev |
 
 ## Deploying to Vercel
 
@@ -89,6 +97,17 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) �
 - `GET /api/nfl/scoreboard?dates=YYYYMMDD` - List NFL games from ESPN (defaults to the current week)
 - `PUT /api/boards/:id/live-game` - Link (`{eventId, xTeamSide}`) or unlink (`{clear: true}`) a live NFL game
 - `POST /api/boards/:id/sync-live` - Pull the linked game's latest score/quarter into the board
+- `PUT /api/boards/:id/draw-axes` - Draw grid numbers: `{runs: N}` randomizes N times (history kept) or `{mode: "manual", xAxis, yAxis}`
+- `PUT /api/boards/:id/payments` - Mark an owner name paid/unpaid (`{name, paid}`)
+- `POST /api/auth/register` / `POST /api/auth/login` / `GET /api/me` - Accounts (scrypt + signed bearer tokens)
+- `POST /api/leagues`, `GET /api/leagues`, `GET/PUT/DELETE /api/leagues/:id` - Leagues (owner only)
+- `POST /api/leagues/:id/members`, `DELETE /api/leagues/:id/members/:memberId` - Roster
+- `GET /api/league-share/:token` - Public read-only league page
+- `GET /api/share/:token` (+ `/my-squares`, `POST /sync-live`) - Public read-only board access for share links
+- `PUT/GET /api/me/tracked` - Squares the signed-in user is tracking per board
+- `GET /api/me/analytics` - Lifetime stats computed from tracked games + recorded results
+
+Boards created by a signed-in user are private to them (share links grant view-only access); boards created without an account remain open to everyone, exactly as before.
 
 ## Tech Stack
 

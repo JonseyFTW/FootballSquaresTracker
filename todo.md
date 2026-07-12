@@ -132,9 +132,11 @@ code as it existed when the audit was taken.
 These are worthwhile but are projects, not fixes — deliberately not included above:
 
 - [x] ~~Live NFL score integration (auto-update scores from a sports API)~~ — **shipped after the audit**: boards can link to a real NFL game via ESPN's public API and auto-sync score/quarter every 30s while live (`server/nflService.js`, Live Score Sync card in the board view).
-- Multi-user boards with share links / realtime sync (websockets)
-- Auth + per-user board ownership
-- Payment/payout tracking per player
+- [x] ~~Multi-user boards with share links~~ — **shipped**: leagues with view-only share links for boards and league pages (`/share/:token`, `/league/share/:token`); viewers watch live, only the owner edits.
+- [x] ~~Auth + per-user board ownership~~ — **shipped**: accounts (scrypt + signed tokens, zero new deps), private owned boards, league ownership, roster management; pre-account boards stay open.
+- [x] ~~Payment/payout tracking per player~~ — **shipped**: price per square, per-player paid checklist with collected/outstanding totals, plus per-user lifetime analytics (games, wins, win rate, winnings, net).
+- Realtime push sync (websockets) — polling covers live scores today
+- Password reset / email verification for accounts
 
 ---
 
