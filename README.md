@@ -54,7 +54,10 @@ npm test
 
 ## Configuration
 
-Copy `.env.example` to `.env`. All values are optional:
+Copy `.env.example` to `.env`. All values are optional. For the live
+squareszn.com deployment, **[SETUP.md](./SETUP.md)** tracks which of these are
+already configured and walks through the remaining one-time setup tasks
+(Google OAuth client, Resend email, Search Console).
 
 | Variable | Purpose |
 |---|---|
