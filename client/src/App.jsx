@@ -4,6 +4,8 @@ import BoardList from './components/BoardList'
 import BoardView from './components/BoardView'
 import CreateBoard from './components/CreateBoard'
 import AuthPage from './components/AuthPage'
+import ForgotPassword from './components/ForgotPassword'
+import ResetPassword from './components/ResetPassword'
 import Leagues from './components/Leagues'
 import LeagueView from './components/LeagueView'
 import LeagueShare from './components/LeagueShare'
@@ -85,6 +87,8 @@ function App() {
           <Route path="/share/:token" element={<BoardView shareMode />} />
           <Route path="/login" element={<AuthPage mode="login" />} />
           <Route path="/register" element={<AuthPage mode="register" />} />
+          <Route path="/forgot" element={<ForgotPassword />} />
+          <Route path="/reset" element={<ResetPassword />} />
           <Route path="/leagues" element={<RequireAuth><Leagues /></RequireAuth>} />
           <Route path="/league/share/:token" element={<LeagueShare />} />
           <Route path="/league/:id" element={<RequireAuth><LeagueView /></RequireAuth>} />

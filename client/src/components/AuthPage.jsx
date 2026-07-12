@@ -83,6 +83,12 @@ function AuthPage({ mode }) {
           />
         </div>
 
+        {!isRegister && (
+          <p className="auth-forgot">
+            <Link to="/forgot">Forgot password?</Link>
+          </p>
+        )}
+
         {error && <div className="track-error">{error}</div>}
 
         <button type="submit" className="btn btn-primary" disabled={loading}>

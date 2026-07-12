@@ -2545,3 +2545,20 @@ input::placeholder {
     scroll-behavior: auto !important;
   }
 }
+
+/* Forgot-password link on the sign-in form */
+.auth-forgot {
+  text-align: right;
+  margin-top: -10px;
+  font-size: 0.82rem;
+}
+
+.auth-forgot a {
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.auth-forgot a:hover {
+  color: var(--primary-1);
+}
