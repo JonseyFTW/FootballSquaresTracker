@@ -32,16 +32,12 @@ function BoardList() {
     e.stopPropagation()
     if (!confirm('Are you sure you want to delete this board?')) return
 
-    try {
-      const response = await fetch(`/api/boards/${id}`, { method: 'DELETE' })
-      if (!response.ok) {
-        alert('Failed to delete board')
-        return
-      }
-      setBoards(boards.filter(b => b.id !== id))
-    } catch (error) {
-      console.error('Error deleting board:', error)
+    const { ok, data } = await apiFetch(`/api/boards/${id}`, { method: 'DELETE' })
+    if (!ok) {
+      alert(data.error || 'Failed to delete board')
+      return
     }
+    setBoards(boards.filter(b => b.id !== id))
   }
 
   const boardTypeLabel = (board) => {
@@ -80,10 +76,20 @@ function BoardList() {
     return (
       <div className="empty-state">
         <h2>No Boards Yet</h2>
-        <p>Create your first football squares board to get started!</p>
-        <Link to="/create" className="btn btn-primary">
-          Create Board
-        </Link>
+        {user ? (
+          <>
+            <p>Create your first football squares board to get started!</p>
+            <Link to="/create" className="btn btn-primary">Create Board</Link>
+          </>
+        ) : (
+          <>
+            <p>
+              No public boards to watch right now. Create a free account to start
+              your own — it takes about a minute.
+            </p>
+            <Link to="/register" className="btn btn-primary">Create Free Account</Link>
+          </>
+        )}
       </div>
     )
   }

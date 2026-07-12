@@ -82,7 +82,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/boards" element={<BoardList />} />
-          <Route path="/create" element={<CreateBoard />} />
+          <Route path="/create" element={<RequireAuth><CreateBoard /></RequireAuth>} />
           <Route path="/board/:id" element={<BoardView />} />
           <Route path="/share/:token" element={<BoardView shareMode />} />
           <Route path="/login" element={<AuthPage mode="login" />} />

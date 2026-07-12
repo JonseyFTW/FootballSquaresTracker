@@ -89,8 +89,8 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) â€
 
 ## API Endpoints
 
-- `GET /api/boards` - List all boards
-- `POST /api/boards` - Create a new board
+- `GET /api/boards` - List boards (public legacy boards + the signed-in user's own)
+- `POST /api/boards` - Create a new board (requires an account)
 - `GET /api/boards/:id` - Get a specific board
 - `PUT /api/boards/:id/score` - Update game score and phase
 - `PUT /api/boards/:id/squares` - Bulk-update square owners (and strip digits)
@@ -115,7 +115,7 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) â€
 - `PUT/GET /api/me/tracked` - Squares the signed-in user is tracking per board
 - `GET /api/me/analytics` - Lifetime stats computed from tracked games + recorded results
 
-Boards created by a signed-in user are private to them (share links grant view-only access); boards created without an account remain open to everyone, exactly as before.
+Creating boards requires an account; boards are private to their owner, and viewing is open to everyone through share links (`/share/:token`, `/league/share/:token`). Boards created before accounts existed remain publicly visible and editable for backward compatibility.
 
 ## Tech Stack
 
