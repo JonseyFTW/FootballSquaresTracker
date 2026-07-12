@@ -1,6 +1,10 @@
 // LLM Service for parsing football squares images
 // Supports: Gemini, Claude, OpenAI
 
+// 10x10 boards produce large JSON (100 squares with owner names); 4096
+// tokens was tight enough to truncate mid-object, so give plenty of room.
+const MAX_OUTPUT_TOKENS = 8192;
+
 const EXTRACTION_PROMPT = `Analyze this football squares grid image and extract all the data.
 
 First determine the board type:
@@ -71,19 +75,23 @@ For strip-10 boards:
 Prize amounts should be numbers without $ symbol`;
 
 // Gemini API (Google AI)
-async function parseWithGemini(imageBase64, apiKey) {
+async function parseWithGemini(imageBase64, mimeType, apiKey) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Header keeps the key out of URLs (and therefore proxy/server logs)
+        'x-goog-api-key': apiKey
+      },
       body: JSON.stringify({
         contents: [{
           parts: [
             { text: EXTRACTION_PROMPT },
             {
               inline_data: {
-                mime_type: 'image/png',
+                mime_type: mimeType,
                 data: imageBase64
               }
             }
@@ -91,7 +99,7 @@ async function parseWithGemini(imageBase64, apiKey) {
         }],
         generationConfig: {
           temperature: 0.1,
-          maxOutputTokens: 4096
+          maxOutputTokens: MAX_OUTPUT_TOKENS
         }
       })
     }
@@ -113,7 +121,7 @@ async function parseWithGemini(imageBase64, apiKey) {
 }
 
 // Claude API (Anthropic)
-async function parseWithClaude(imageBase64, apiKey) {
+async function parseWithClaude(imageBase64, mimeType, apiKey) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -122,8 +130,8 @@ async function parseWithClaude(imageBase64, apiKey) {
       'anthropic-version': '2023-06-01'
     },
     body: JSON.stringify({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 4096,
+      model: 'claude-sonnet-5',
+      max_tokens: MAX_OUTPUT_TOKENS,
       messages: [{
         role: 'user',
         content: [
@@ -131,7 +139,7 @@ async function parseWithClaude(imageBase64, apiKey) {
             type: 'image',
             source: {
               type: 'base64',
-              media_type: 'image/png',
+              media_type: mimeType,
               data: imageBase64
             }
           },
@@ -160,7 +168,7 @@ async function parseWithClaude(imageBase64, apiKey) {
 }
 
 // OpenAI API
-async function parseWithOpenAI(imageBase64, apiKey) {
+async function parseWithOpenAI(imageBase64, mimeType, apiKey) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -169,7 +177,7 @@ async function parseWithOpenAI(imageBase64, apiKey) {
     },
     body: JSON.stringify({
       model: 'gpt-4o-mini',
-      max_tokens: 4096,
+      max_tokens: MAX_OUTPUT_TOKENS,
       messages: [{
         role: 'user',
         content: [
@@ -180,7 +188,7 @@ async function parseWithOpenAI(imageBase64, apiKey) {
           {
             type: 'image_url',
             image_url: {
-              url: `data:image/png;base64,${imageBase64}`
+              url: `data:${mimeType};base64,${imageBase64}`
             }
           }
         ]
@@ -222,8 +230,11 @@ function parseJsonResponse(text) {
   }
 }
 
-// Validate and normalize the parsed data
+// Validate and normalize the parsed data. Any silent correction is
+// reported in data.warnings so the user can verify against the photo.
 function validateAndNormalize(data) {
+  const warnings = [];
+
   // Validate required fields
   if (!data.type || !['5x5', '10x10', 'strip-10'].includes(data.type)) {
     throw new Error('Invalid or missing board type');
@@ -237,12 +248,12 @@ function validateAndNormalize(data) {
     // Strip-10 validation
     // Axes are optional for strip-10 (used for reference but digits are on squares)
     if (Array.isArray(data.xAxis) && data.xAxis.length > 0) {
-      data.xAxis = normalizeAxis(data.xAxis);
+      data.xAxis = normalizeAxis(data.xAxis, 'X-axis', warnings);
     } else {
       data.xAxis = [];
     }
     if (Array.isArray(data.yAxis) && data.yAxis.length > 0) {
-      data.yAxis = normalizeAxis(data.yAxis);
+      data.yAxis = normalizeAxis(data.yAxis, 'Y-axis', warnings);
     } else {
       data.yAxis = [];
     }
@@ -253,12 +264,30 @@ function validateAndNormalize(data) {
     }
 
     // Normalize strip-10 squares
-    data.squares = data.squares.map((sq, idx) => ({
-      number: sq.number || idx + 1,
-      xDigits: (sq.xDigits || []).map(d => parseInt(d, 10)).filter(d => !isNaN(d)),
-      yDigits: (sq.yDigits || []).map(d => parseInt(d, 10)).filter(d => !isNaN(d)),
-      owner: sq.owner || ''
-    }));
+    data.squares = data.squares.map((sq, idx) => {
+      const number = sq.number || idx + 1;
+      const rawX = (sq.xDigits || []).map(d => parseInt(d, 10)).filter(d => !isNaN(d) && d >= 0 && d <= 9);
+      const rawY = (sq.yDigits || []).map(d => parseInt(d, 10)).filter(d => !isNaN(d) && d >= 0 && d <= 9);
+      const xDigits = [...new Set(rawX)];
+      const yDigits = [...new Set(rawY)];
+
+      if (xDigits.length !== rawX.length || yDigits.length !== rawY.length) {
+        warnings.push(`Square #${number}: duplicate digits were removed — verify against the image`);
+      }
+      if (xDigits.length !== 5) {
+        warnings.push(`Square #${number}: read ${xDigits.length} X-team digits (expected 5) — verify against the image`);
+      }
+      if (yDigits.length !== 2) {
+        warnings.push(`Square #${number}: read ${yDigits.length} Y-team digits (expected 2) — verify against the image`);
+      }
+
+      return {
+        number,
+        xDigits,
+        yDigits,
+        owner: sq.owner || ''
+      };
+    });
   } else {
     // Grid type validation
     if (!Array.isArray(data.xAxis) || !Array.isArray(data.yAxis)) {
@@ -266,8 +295,8 @@ function validateAndNormalize(data) {
     }
 
     // Normalize axis arrays to have exactly 10 digits
-    data.xAxis = normalizeAxis(data.xAxis);
-    data.yAxis = normalizeAxis(data.yAxis);
+    data.xAxis = normalizeAxis(data.xAxis, 'X-axis', warnings);
+    data.yAxis = normalizeAxis(data.yAxis, 'Y-axis', warnings);
 
     // Validate squares
     const expectedSquares = data.type === '5x5' ? 25 : 100;
@@ -292,15 +321,25 @@ function validateAndNormalize(data) {
     final: Number(data.prizes?.final) || 0
   };
 
+  data.warnings = warnings;
+
   return data;
 }
 
-// Normalize axis to ensure 10 unique digits (0-9 each appearing once)
-function normalizeAxis(axis) {
+// Normalize axis to ensure 10 unique digits (0-9 each appearing once).
+// Reports every substitution via the warnings array so a misread photo
+// can't silently become a confidently wrong board.
+function normalizeAxis(axis, label = 'Axis', warnings = []) {
   const normalized = axis.map(d => {
     const num = parseInt(String(d), 10);
     return isNaN(num) ? -1 : num % 10;
   });
+
+  if (normalized.length < 10) {
+    warnings.push(`${label}: only ${normalized.length} of 10 digits were read; the rest were filled in automatically`);
+  } else if (normalized.length > 10) {
+    warnings.push(`${label}: ${normalized.length} digits were read; extras beyond 10 were dropped`);
+  }
 
   // Ensure we have exactly 10 slots
   while (normalized.length < 10) {
@@ -316,7 +355,6 @@ function normalizeAxis(axis) {
   });
 
   const missing = [];
-  const duplicatePositions = [];
 
   for (let i = 0; i < 10; i++) {
     if (digitCounts[i] === 0) missing.push(i);
@@ -329,7 +367,10 @@ function normalizeAxis(axis) {
     if (d < 0 || d > 9 || seen.has(d)) {
       // This position has invalid or duplicate digit - replace with a missing one
       if (missing.length > 0) {
-        normalized[i] = missing.shift();
+        const replacement = missing.shift();
+        const original = i < axis.length ? `"${axis[i]}"` : 'a missing digit';
+        warnings.push(`${label} position ${i + 1}: ${original} was ${d < 0 || d > 9 ? 'unreadable' : 'a duplicate'}; replaced with ${replacement} — verify against the image`);
+        normalized[i] = replacement;
       }
     } else {
       seen.add(d);
@@ -343,6 +384,7 @@ function normalizeAxis(axis) {
       // Still have a duplicate - find any remaining missing digit
       for (let d = 0; d < 10; d++) {
         if (!finalSeen.has(d)) {
+          warnings.push(`${label} position ${i + 1}: duplicate replaced with ${d} — verify against the image`);
           normalized[i] = d;
           break;
         }
@@ -355,17 +397,17 @@ function normalizeAxis(axis) {
 }
 
 // Main export - parse image with specified provider
-async function parseImage(imageBase64, provider, apiKey) {
+async function parseImage(imageBase64, mimeType, provider, apiKey) {
   switch (provider.toLowerCase()) {
     case 'gemini':
-      return parseWithGemini(imageBase64, apiKey);
+      return parseWithGemini(imageBase64, mimeType, apiKey);
     case 'claude':
-      return parseWithClaude(imageBase64, apiKey);
+      return parseWithClaude(imageBase64, mimeType, apiKey);
     case 'openai':
-      return parseWithOpenAI(imageBase64, apiKey);
+      return parseWithOpenAI(imageBase64, mimeType, apiKey);
     default:
       throw new Error(`Unknown provider: ${provider}. Use 'gemini', 'claude', or 'openai'`);
   }
 }
 
-module.exports = { parseImage };
+module.exports = { parseImage, parseJsonResponse, validateAndNormalize, normalizeAxis };

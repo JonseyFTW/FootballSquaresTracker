@@ -1,28 +1,57 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 
+const PERIODS = [
+  { key: 'q1', label: '1st Quarter' },
+  { key: 'half', label: 'Halftime' },
+  { key: 'q3', label: '3rd Quarter' },
+  { key: 'final', label: 'Final' }
+]
+
+const parseSquareNumbers = (input) =>
+  [...new Set(input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n)))]
+
+const parseDigitList = (input) =>
+  [...new Set(input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 0 && n <= 9))]
+    .sort((a, b) => a - b)
+
 function BoardView() {
   const { id } = useParams()
   const [board, setBoard] = useState(null)
   const [loading, setLoading] = useState(true)
   const [mySquares, setMySquares] = useState('')
   const [mySquareNumbers, setMySquareNumbers] = useState([])
+  const [trackError, setTrackError] = useState(null)
   const [winningCombinations, setWinningCombinations] = useState([])
-  const [currentWinner, setCurrentWinner] = useState(null)
+  const [currentWinners, setCurrentWinners] = useState([])
   const [editingSquare, setEditingSquare] = useState(null)
   const [editOwnerValue, setEditOwnerValue] = useState('')
-  const [scoreX, setScoreX] = useState(0)
-  const [scoreY, setScoreY] = useState(0)
+  const [editXDigits, setEditXDigits] = useState('')
+  const [editYDigits, setEditYDigits] = useState('')
+  const [editError, setEditError] = useState(null)
+  const [scoreX, setScoreX] = useState('0')
+  const [scoreY, setScoreY] = useState('0')
   const [gamePhase, setGamePhase] = useState('pre-game')
+  const [recordingPeriod, setRecordingPeriod] = useState(null)
+
+  const storageKey = `fst-my-squares-${id}`
 
   useEffect(() => {
+    // Reset everything when navigating between boards
+    setLoading(true)
+    setBoard(null)
+    setMySquares('')
+    setMySquareNumbers([])
+    setWinningCombinations([])
+    setCurrentWinners([])
+    setTrackError(null)
     fetchBoard()
   }, [id])
 
   useEffect(() => {
     if (board) {
-      setScoreX(board.currentScore?.xTeam || 0)
-      setScoreY(board.currentScore?.yTeam || 0)
+      setScoreX(String(board.currentScore?.xTeam ?? 0))
+      setScoreY(String(board.currentScore?.yTeam ?? 0))
       setGamePhase(board.gamePhase || 'pre-game')
     }
   }, [board])
@@ -36,6 +65,13 @@ function BoardView() {
       }
       const data = await response.json()
       setBoard(data)
+
+      // Restore tracked squares from the last visit
+      const saved = localStorage.getItem(storageKey)
+      if (saved) {
+        setMySquares(saved)
+        trackSquares(saved)
+      }
     } catch (error) {
       console.error('Error fetching board:', error)
     } finally {
@@ -43,28 +79,47 @@ function BoardView() {
     }
   }
 
-  const trackMySquares = async () => {
-    if (!mySquares.trim()) return
-
-    const squareNums = mySquares.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+  const trackSquares = async (input) => {
+    const squareNums = parseSquareNumbers(input)
     setMySquareNumbers(squareNums)
+    setTrackError(null)
+
+    if (squareNums.length === 0) {
+      setWinningCombinations([])
+      setCurrentWinners([])
+      localStorage.removeItem(storageKey)
+      if (input.trim()) {
+        setTrackError('Enter square numbers separated by commas, e.g. 1, 5, 12')
+      }
+      return
+    }
+
+    localStorage.setItem(storageKey, squareNums.join(', '))
 
     try {
       const response = await fetch(`/api/boards/${id}/my-squares?squares=${squareNums.join(',')}`)
-      const data = await response.json()
-      setWinningCombinations(data.winningCombinations)
-      setCurrentWinner(data.currentWinner)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setTrackError(data.error || 'Failed to look up your squares')
+        return
+      }
+      setWinningCombinations(data.winningCombinations || [])
+      setCurrentWinners(data.currentWinners || [])
     } catch (error) {
       console.error('Error tracking squares:', error)
+      setTrackError('Failed to look up your squares')
     }
   }
 
   const updateScore = async () => {
+    const x = parseInt(scoreX, 10)
+    const y = parseInt(scoreY, 10)
+
     try {
       const response = await fetch(`/api/boards/${id}/score`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ xTeam: scoreX, yTeam: scoreY, gamePhase })
+        body: JSON.stringify({ xTeam: isNaN(x) ? 0 : x, yTeam: isNaN(y) ? 0 : y, gamePhase })
       })
       if (!response.ok) {
         console.error('Error updating score: server returned', response.status)
@@ -75,43 +130,109 @@ function BoardView() {
 
       // Re-check winning status if tracking squares
       if (mySquareNumbers.length > 0) {
-        trackMySquares()
+        trackSquares(mySquareNumbers.join(','))
       }
     } catch (error) {
       console.error('Error updating score:', error)
     }
   }
 
-  const updateSquareOwner = async () => {
+  const bumpScore = (setter, current, delta) => {
+    const value = parseInt(current, 10) || 0
+    setter(String(Math.max(0, value + delta)))
+  }
+
+  const openSquareEditor = (square) => {
+    setEditingSquare(square.number)
+    setEditOwnerValue(square.owner || '')
+    setEditError(null)
+    if (board.type === 'strip-10') {
+      setEditXDigits((square.xDigits || []).join(', '))
+      setEditYDigits((square.yDigits || []).join(', '))
+    }
+  }
+
+  const closeSquareEditor = () => {
+    setEditingSquare(null)
+    setEditOwnerValue('')
+    setEditXDigits('')
+    setEditYDigits('')
+    setEditError(null)
+  }
+
+  const updateSquare = async () => {
     if (!editingSquare) return
+
+    const body = { owner: editOwnerValue }
+    if (board.type === 'strip-10') {
+      const xDigits = parseDigitList(editXDigits)
+      const yDigits = parseDigitList(editYDigits)
+      if (xDigits.length === 0 || yDigits.length === 0) {
+        setEditError('Each team needs at least one digit between 0 and 9')
+        return
+      }
+      body.xDigits = xDigits
+      body.yDigits = yDigits
+    }
 
     try {
       const response = await fetch(`/api/boards/${id}/squares/${editingSquare}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner: editOwnerValue })
+        body: JSON.stringify(body)
       })
+      const data = await response.json().catch(() => ({}))
       if (!response.ok) {
-        console.error('Error updating owner: server returned', response.status)
+        setEditError(data.error || 'Failed to save square')
         return
       }
-      const data = await response.json()
       setBoard(data)
-      setEditingSquare(null)
-      setEditOwnerValue('')
+      closeSquareEditor()
+
+      // Owner names appear in tracked-square results; refresh them
+      if (mySquareNumbers.length > 0) {
+        trackSquares(mySquareNumbers.join(','))
+      }
     } catch (error) {
-      console.error('Error updating owner:', error)
+      console.error('Error updating square:', error)
+      setEditError('Failed to save square')
     }
   }
 
-  // Calculate winning square based on current score (skip pre-game)
-  const winningSquare = useMemo(() => {
-    if (!board || !board.currentScore) return null
-    if (board.gamePhase === 'pre-game') return null
+  const recordPeriodResult = async (period) => {
+    const existing = board.periodResults?.[period.key]
+    if (existing && !confirm(`Overwrite the recorded ${period.label} result?`)) return
+
+    setRecordingPeriod(period.key)
+    try {
+      const response = await fetch(`/api/boards/${id}/period-result`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ period: period.key })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        alert(data.error || 'Failed to record result')
+        return
+      }
+      setBoard(data)
+    } catch (error) {
+      console.error('Error recording period result:', error)
+    } finally {
+      setRecordingPeriod(null)
+    }
+  }
+
+  // All squares winning at the current score (legacy strip boards can
+  // have more than one)
+  const winningSquares = useMemo(() => {
+    if (!board || !board.currentScore) return []
+    if (board.gamePhase === 'pre-game') return []
 
     const xLastDigit = board.currentScore.xTeam % 10
     const yLastDigit = board.currentScore.yTeam % 10
 
+    const winners = []
     for (const square of board.squares) {
       let xDigits, yDigits
 
@@ -132,11 +253,11 @@ function BoardView() {
       }
 
       if (xDigits.includes(xLastDigit) && yDigits.includes(yLastDigit)) {
-        return square.number
+        winners.push(square.number)
       }
     }
 
-    return null
+    return winners
   }, [board])
 
   // Build a lookup map for O(1) square access by position (must be before early returns - Rules of Hooks)
@@ -167,7 +288,13 @@ function BoardView() {
     )
   }
 
-  const gridSize = board.type === '5x5' ? 5 : (board.type === 'strip-10' ? 10 : 10)
+  const gridSize = board.type === '5x5' ? 5 : 10
+  const isPreGame = board.gamePhase === 'pre-game'
+
+  const winnerLabel = (num) => {
+    const sq = board.squares.find(s => s.number === num)
+    return `#${num}${sq?.owner ? ` (${sq.owner})` : ''}`
+  }
 
   // Render strip-10 layout
   const renderStripGrid = () => {
@@ -175,16 +302,13 @@ function BoardView() {
       <div className="strip-grid">
         {board.squares.map((square) => {
           const isHighlighted = mySquareNumbers.includes(square.number)
-          const isWinning = winningSquare === square.number
+          const isWinning = winningSquares.includes(square.number)
 
           return (
             <div
               key={`square-${square.number}`}
               className={`strip-square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''}`}
-              onClick={() => {
-                setEditingSquare(square.number)
-                setEditOwnerValue(square.owner || '')
-              }}
+              onClick={() => openSquareEditor(square)}
             >
               <div className="strip-square-header">
                 <span className="square-number">#{square.number}</span>
@@ -264,16 +388,13 @@ function BoardView() {
         }
 
         const isHighlighted = mySquareNumbers.includes(square.number)
-        const isWinning = winningSquare === square.number
+        const isWinning = winningSquares.includes(square.number)
 
         rowCells.push(
           <div
             key={`square-${square.number}`}
             className={`square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''}`}
-            onClick={() => {
-              setEditingSquare(square.number)
-              setEditOwnerValue(square.owner || '')
-            }}
+            onClick={() => openSquareEditor(square)}
           >
             <span className="square-number">{square.number}</span>
             <span className="square-owner">{square.owner || '-'}</span>
@@ -311,13 +432,11 @@ function BoardView() {
             <div className="score-value y-team">{board.currentScore?.yTeam || 0}</div>
           </div>
         </div>
-        <div className="game-phase">{gamePhase}</div>
-        {winningSquare && (
-          <div style={{ marginTop: '15px', color: '#2ecc71', fontWeight: 600 }}>
-            Current Winning Square: #{winningSquare}
-            {board.squares.find(s => s.number === winningSquare)?.owner && (
-              <span> ({board.squares.find(s => s.number === winningSquare)?.owner})</span>
-            )}
+        <div className="game-phase">{board.gamePhase || 'pre-game'}</div>
+        {winningSquares.length > 0 && (
+          <div className="winning-banner">
+            {winningSquares.length === 1 ? 'Current Winning Square: ' : 'Current Winning Squares: '}
+            {winningSquares.map(winnerLabel).join(', ')}
           </div>
         )}
       </div>
@@ -337,10 +456,12 @@ function BoardView() {
             <div className="team-labels">
               <span className="x-team-label">{board.xTeamName}</span>
             </div>
-            <div className="grid-with-y-label">
-              <div className="y-team-label">{board.yTeamName}</div>
-              <div className={`squares-grid grid-${board.type}`}>
-                {renderGrid()}
+            <div className="grid-scroll">
+              <div className="grid-with-y-label">
+                <div className="y-team-label">{board.yTeamName}</div>
+                <div className={`squares-grid grid-${board.type}`}>
+                  {renderGrid()}
+                </div>
               </div>
             </div>
           </div>
@@ -356,17 +477,25 @@ function BoardView() {
                 placeholder="Enter square #s (e.g., 1, 5, 12)"
                 value={mySquares}
                 onChange={(e) => setMySquares(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && trackMySquares()}
+                onKeyDown={(e) => e.key === 'Enter' && trackSquares(mySquares)}
               />
-              <button className="btn btn-primary" onClick={trackMySquares}>
+              <button className="btn btn-primary" onClick={() => trackSquares(mySquares)}>
                 Track
               </button>
             </div>
 
-            {currentWinner && (
+            {trackError && (
+              <div className="track-error">{trackError}</div>
+            )}
+
+            {currentWinners.length > 0 && (
               <div className="current-winner">
                 <h4>YOU'RE WINNING!</h4>
-                <p>Square #{currentWinner.squareNumber}</p>
+                {currentWinners.map(w => (
+                  <p key={w.squareNumber}>
+                    Square #{w.squareNumber}{w.owner ? ` — ${w.owner}` : ''}
+                  </p>
+                ))}
               </div>
             )}
 
@@ -407,8 +536,13 @@ function BoardView() {
                   type="number"
                   min="0"
                   value={scoreX}
-                  onChange={(e) => setScoreX(parseInt(e.target.value) || 0)}
+                  onChange={(e) => setScoreX(e.target.value)}
                 />
+                <div className="quick-score-buttons">
+                  <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 7)}>+7</button>
+                  <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 3)}>+3</button>
+                  <button type="button" onClick={() => bumpScore(setScoreX, scoreX, 1)}>+1</button>
+                </div>
               </div>
               <div className="score-input-group">
                 <label>{board.yTeamName}</label>
@@ -416,8 +550,13 @@ function BoardView() {
                   type="number"
                   min="0"
                   value={scoreY}
-                  onChange={(e) => setScoreY(parseInt(e.target.value) || 0)}
+                  onChange={(e) => setScoreY(e.target.value)}
                 />
+                <div className="quick-score-buttons">
+                  <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 7)}>+7</button>
+                  <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 3)}>+3</button>
+                  <button type="button" onClick={() => bumpScore(setScoreY, scoreY, 1)}>+1</button>
+                </div>
               </div>
             </div>
             <select
@@ -439,59 +578,92 @@ function BoardView() {
             </button>
           </div>
 
-          {/* Prizes */}
-          {board.prizes && (board.prizes.q1 || board.prizes.half || board.prizes.q3 || board.prizes.final) && (
-            <div className="card">
-              <h3>Prizes</h3>
-              <div className="prizes-display">
-                {board.prizes.q1 > 0 && (
-                  <div className="prize-item">
-                    <div className="period">1st Quarter</div>
-                    <div className="amount">${board.prizes.q1}</div>
+          {/* Prizes & Period Results */}
+          <div className="card">
+            <h3>Prizes & Results</h3>
+            <div className="period-results">
+              {PERIODS.map(period => {
+                const amount = board.prizes?.[period.key] || 0
+                const result = board.periodResults?.[period.key]
+                const winnersText = result
+                  ? (result.winners.length > 0
+                      ? result.winners.map(w => w.owner || `#${w.squareNumber}`).join(', ')
+                      : 'No winner')
+                  : null
+
+                return (
+                  <div key={period.key} className="period-row">
+                    <div className="period-info">
+                      <span className="period">{period.label}</span>
+                      {amount > 0 && <span className="amount">${amount}</span>}
+                    </div>
+                    <div className="period-result">
+                      {result ? (
+                        <span className="period-winner">
+                          🏆 {winnersText}
+                          <span className="period-score"> {result.score.xTeam}-{result.score.yTeam}</span>
+                        </span>
+                      ) : (
+                        <span className="period-winner unrecorded">Not recorded</span>
+                      )}
+                      <button
+                        type="button"
+                        className="btn-record"
+                        disabled={isPreGame || recordingPeriod === period.key}
+                        title={isPreGame
+                          ? 'Update the score and game phase first'
+                          : (result ? 'Re-record with the current score' : 'Record the current score as this result')}
+                        onClick={() => recordPeriodResult(period)}
+                      >
+                        {result ? '↻' : 'Record'}
+                      </button>
+                    </div>
                   </div>
-                )}
-                {board.prizes.half > 0 && (
-                  <div className="prize-item">
-                    <div className="period">Halftime</div>
-                    <div className="amount">${board.prizes.half}</div>
-                  </div>
-                )}
-                {board.prizes.q3 > 0 && (
-                  <div className="prize-item">
-                    <div className="period">3rd Quarter</div>
-                    <div className="amount">${board.prizes.q3}</div>
-                  </div>
-                )}
-                {board.prizes.final > 0 && (
-                  <div className="prize-item">
-                    <div className="period">Final</div>
-                    <div className="amount">${board.prizes.final}</div>
-                  </div>
-                )}
-              </div>
+                )
+              })}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* Edit Owner Modal */}
+      {/* Edit Square Modal */}
       {editingSquare && (
-        <div className="modal-overlay" onClick={() => setEditingSquare(null)}>
+        <div className="modal-overlay" onClick={closeSquareEditor}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Edit Square #{editingSquare}</h3>
             <input
               type="text"
               placeholder="Enter owner name"
+              maxLength={60}
               value={editOwnerValue}
               onChange={(e) => setEditOwnerValue(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && updateSquareOwner()}
+              onKeyDown={(e) => e.key === 'Enter' && updateSquare()}
               autoFocus
             />
+            {board.type === 'strip-10' && (
+              <>
+                <label className="modal-label">{board.xTeamName} digits (usually 5)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 0, 2, 4, 6, 8"
+                  value={editXDigits}
+                  onChange={(e) => setEditXDigits(e.target.value)}
+                />
+                <label className="modal-label">{board.yTeamName} digits (usually 2)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 3, 7"
+                  value={editYDigits}
+                  onChange={(e) => setEditYDigits(e.target.value)}
+                />
+              </>
+            )}
+            {editError && <div className="modal-error">{editError}</div>}
             <div className="modal-actions">
-              <button className="btn btn-secondary" onClick={() => setEditingSquare(null)}>
+              <button className="btn btn-secondary" onClick={closeSquareEditor}>
                 Cancel
               </button>
-              <button className="btn btn-primary" onClick={updateSquareOwner}>
+              <button className="btn btn-primary" onClick={updateSquare}>
                 Save
               </button>
             </div>

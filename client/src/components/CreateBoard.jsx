@@ -18,6 +18,9 @@ function CreateBoard() {
   })
   const [loading, setLoading] = useState(false)
   const [importedSquares, setImportedSquares] = useState(null)
+  const [importedType, setImportedType] = useState(null)
+  const [importWarnings, setImportWarnings] = useState([])
+  const [importNotice, setImportNotice] = useState(null)
   const [showImport, setShowImport] = useState(true)
 
   const handleXAxisChange = (index, value) => {
@@ -44,8 +47,11 @@ function CreateBoard() {
   const handleImportComplete = (data) => {
     // Populate form with imported data
     setBoardType(data.type)
+    setImportedType(data.type)
     setXTeamName(data.xTeamName)
     setYTeamName(data.yTeamName)
+    setImportWarnings(data.warnings || [])
+    setImportNotice(null)
 
     // Strip-10 may not have axis arrays
     if (data.type === 'strip-10') {
@@ -70,6 +76,22 @@ function CreateBoard() {
       setName(`${data.xTeamName} vs ${data.yTeamName} Squares`)
     }
   }
+
+  // Imported squares only make sense for the board type they came from —
+  // switching types would otherwise send stale squares to the server.
+  const handleBoardTypeChange = (newType) => {
+    setBoardType(newType)
+    if (importedSquares && newType !== importedType) {
+      setImportedSquares(null)
+      setImportedType(null)
+      setImportWarnings([])
+      setImportNotice('Imported squares were discarded because the board type changed. Import the image again if that was a mistake.')
+    }
+  }
+
+  const filledSquareCount = importedSquares
+    ? importedSquares.filter(sq => sq.owner && String(sq.owner).trim() !== '').length
+    : 0
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -125,11 +147,11 @@ function CreateBoard() {
         body: JSON.stringify(boardPayload)
       })
 
+      const data = await response.json().catch(() => ({}))
       if (response.ok) {
-        const board = await response.json()
-        navigate(`/board/${board.id}`)
+        navigate(`/board/${data.id}`)
       } else {
-        alert('Error creating board')
+        alert(data.error || 'Error creating board')
       }
     } catch (error) {
       console.error('Error:', error)
@@ -152,16 +174,35 @@ function CreateBoard() {
           </div>
         </div>
       ) : (
-        <div className="import-success">
-          <span>Data imported successfully!</span>
-          <button
-            type="button"
-            className="btn btn-secondary btn-small"
-            onClick={() => setShowImport(true)}
-          >
-            Import Another
-          </button>
+        <div className="import-summary">
+          <div className="import-success">
+            <span>
+              Imported a {importedType === 'strip-10' ? '10-strip' : importedType} board — {xTeamName} vs {yTeamName},{' '}
+              {filledSquareCount} of {importedSquares?.length || 0} squares have owners.
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-small"
+              onClick={() => setShowImport(true)}
+            >
+              Import Another
+            </button>
+          </div>
+          {importWarnings.length > 0 && (
+            <div className="import-warnings">
+              <strong>Check these before creating the board:</strong>
+              <ul>
+                {importWarnings.map((warning, idx) => (
+                  <li key={idx}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
+      )}
+
+      {importNotice && (
+        <div className="import-notice">{importNotice}</div>
       )}
 
       <form className="create-board-form" onSubmit={handleSubmit}>
@@ -178,7 +219,7 @@ function CreateBoard() {
 
         <div className="form-group">
           <label>Board Type</label>
-          <select value={boardType} onChange={(e) => setBoardType(e.target.value)}>
+          <select value={boardType} onChange={(e) => handleBoardTypeChange(e.target.value)}>
             <option value="5x5">5x5 Grid (25 squares, 2 digits per cell)</option>
             <option value="10x10">10x10 Grid (100 squares, 1 digit per cell)</option>
             <option value="strip-10">10 Strip (10 squares, 5 digits for one team, 2 for other)</option>
@@ -216,7 +257,8 @@ function CreateBoard() {
               This gives each square 10 possible winning score combinations (5 x 2).
             </p>
             <p style={{ color: '#64ffda', fontSize: '0.85rem', marginTop: '5px' }}>
-              Numbers are distributed so each digit (0-9) appears in exactly 5 squares for the primary team and 2 squares for the secondary team.
+              Numbers are distributed so every possible score has exactly one winner: each digit (0-9) appears in exactly 5 squares
+              for the primary team and 2 squares for the secondary team. You can edit any square's digits later from the board view.
             </p>
           </div>
         ) : (

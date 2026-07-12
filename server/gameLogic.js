@@ -1,0 +1,139 @@
+// Pure game logic for football squares — no storage or HTTP dependencies.
+
+const DIGITS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+function shuffle(arr) {
+  const result = [...arr];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+// A strip-10 board must tile all 100 (x,y) last-digit combinations across
+// 10 squares so that every possible score has exactly one winner. Splitting
+// the shuffled x-digits into 2 groups of 5 and the y-digits into 5 groups
+// of 2 makes the ten (xGroup x yGroup) blocks a partition of the space.
+// Dealing digits from repeated pools (the old approach) allowed duplicate
+// digits inside a square and scores with zero or multiple winners.
+function generateStrip10Assignments() {
+  const xDigits = shuffle(DIGITS);
+  const yDigits = shuffle(DIGITS);
+
+  const xGroups = [xDigits.slice(0, 5), xDigits.slice(5)];
+  const yGroups = [];
+  for (let i = 0; i < 10; i += 2) {
+    yGroups.push(yDigits.slice(i, i + 2));
+  }
+
+  const blocks = [];
+  for (const xGroup of xGroups) {
+    for (const yGroup of yGroups) {
+      blocks.push({
+        xDigits: [...xGroup].sort((a, b) => a - b),
+        yDigits: [...yGroup].sort((a, b) => a - b)
+      });
+    }
+  }
+
+  return shuffle(blocks);
+}
+
+// Resolve which last digits a square covers, for any board type.
+// Returns null for squares that lack the data needed to decide.
+function getSquareDigits(board, square) {
+  if (board.type === 'strip-10') {
+    return { xDigits: square.xDigits || [], yDigits: square.yDigits || [] };
+  }
+  const { row, col } = square;
+  if (row == null || col == null) return null;
+  if (board.type === '5x5') {
+    return {
+      xDigits: [board.xAxis[col * 2], board.xAxis[col * 2 + 1]],
+      yDigits: [board.yAxis[row * 2], board.yAxis[row * 2 + 1]]
+    };
+  }
+  return { xDigits: [board.xAxis[col]], yDigits: [board.yAxis[row]] };
+}
+
+// All squares that win at the board's current score. Empty pre-game.
+// Legacy strip-10 boards can cover a combo more than once, so this
+// deliberately returns every match rather than the first.
+function findWinningSquares(board) {
+  if (!board.currentScore) return [];
+  if (board.gamePhase === 'pre-game') return [];
+
+  const xLastDigit = board.currentScore.xTeam % 10;
+  const yLastDigit = board.currentScore.yTeam % 10;
+
+  const winners = [];
+  for (const square of board.squares) {
+    const digits = getSquareDigits(board, square);
+    if (!digits) continue;
+    if (digits.xDigits.includes(xLastDigit) && digits.yDigits.includes(yLastDigit)) {
+      winners.push({ squareNumber: square.number, owner: square.owner || '' });
+    }
+  }
+  return winners;
+}
+
+// The subset of the user's squares that win at the current score.
+function checkCurrentWinners(board, userSquares) {
+  const userSet = new Set(userSquares);
+  return findWinningSquares(board).filter(w => userSet.has(w.squareNumber));
+}
+
+// Every (x,y) digit combo the user's squares cover, with example scores.
+function calculateWinningScores(board, userSquares) {
+  const winningCombinations = [];
+
+  for (const squareNum of userSquares) {
+    const square = board.squares.find(s => s.number === squareNum);
+    if (!square) continue;
+
+    const digits = getSquareDigits(board, square);
+    if (!digits) continue;
+
+    for (const xDigit of digits.xDigits) {
+      for (const yDigit of digits.yDigits) {
+        const examples = [];
+        for (let x = 0; x <= 40; x += 10) {
+          for (let y = 0; y <= 40; y += 10) {
+            examples.push({ x: x + xDigit, y: y + yDigit });
+          }
+        }
+        // Low-total scores first so the examples read like plausible games
+        // instead of six variations that share the same x-team score.
+        examples.sort((a, b) => (a.x + a.y) - (b.x + b.y) || a.x - b.x);
+
+        winningCombinations.push({
+          squareNumber: squareNum,
+          owner: square.owner,
+          xTeamDigit: xDigit,
+          yTeamDigit: yDigit,
+          exampleScores: examples.slice(0, 6)
+        });
+      }
+    }
+  }
+
+  return winningCombinations;
+}
+
+// True when the axis is a permutation of the digits 0-9.
+function isValidAxisPermutation(axis) {
+  if (!Array.isArray(axis) || axis.length !== 10) return false;
+  const seen = new Set(axis.map(Number));
+  return seen.size === 10 && DIGITS.every(d => seen.has(d));
+}
+
+module.exports = {
+  shuffle,
+  generateStrip10Assignments,
+  getSquareDigits,
+  findWinningSquares,
+  checkCurrentWinners,
+  calculateWinningScores,
+  isValidAxisPermutation
+};
