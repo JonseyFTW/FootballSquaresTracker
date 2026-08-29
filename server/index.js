@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { parseImage, DEFAULT_OPENROUTER_MODEL } = require('./llmService');
-const { getScoreboard, getGame, applyGameToBoard } = require('./nflService');
+const { getScoreboard, getGame, applyGameToBoard, completedPeriodScores } = require('./nflService');
 const storage = require('./storage');
 const auth = require('./authService');
 const { sendPasswordResetEmail } = require('./emailService');
@@ -19,6 +19,7 @@ const {
   findWinningSquares,
   checkCurrentWinners,
   calculateWinningScores,
+  latestCompletedPeriod,
   isValidAxisPermutation
 } = require('./gameLogic');
 
@@ -1013,7 +1014,18 @@ app.put('/api/boards/:id/score', async (req, res) => {
       if (typeof gamePhase !== 'string' || gamePhase.length === 0 || gamePhase.length > MAX_PHASE_LENGTH) {
         return res.status(400).json({ error: 'Invalid game phase' });
       }
+      const prevPhase = board.gamePhase;
       board.gamePhase = gamePhase;
+
+      // Advancing the phase by hand means the submitted score is the one
+      // the finished period ended on — record it so nobody has to remember
+      // to hit Record at exactly the right moment.
+      const completed = latestCompletedPeriod(prevPhase, gamePhase);
+      if (completed && boardHasAxes(board) && !(board.periodResults || {})[completed]) {
+        board.periodResults = board.periodResults || {};
+        board.periodResults[completed] =
+          buildPeriodResult(board, board.currentScore.xTeam, board.currentScore.yTeam, true);
+      }
     }
 
     await storage.saveBoard(board);
@@ -1048,11 +1060,8 @@ app.put('/api/boards/:id/period-result', async (req, res) => {
       return res.status(400).json({ error: 'Set the score and game phase before recording a result' });
     }
 
-    board.periodResults[period] = {
-      winners: findWinningSquares(board),
-      score: { xTeam: board.currentScore.xTeam, yTeam: board.currentScore.yTeam },
-      recordedAt: new Date().toISOString()
-    };
+    board.periodResults[period] =
+      buildPeriodResult(board, board.currentScore.xTeam, board.currentScore.yTeam);
 
     await storage.saveBoard(board);
     res.json({ ...board, canEdit: true });
@@ -1097,10 +1106,48 @@ app.put('/api/boards/:id/live-game', async (req, res) => {
   }
 });
 
+// The winning square(s) for an arbitrary score, without disturbing the
+// board's live state. Winners carry the owner's name when the square is
+// claimed; viewers see the square number otherwise.
+function buildPeriodResult(board, xTeam, yTeam, auto = false) {
+  const winners = findWinningSquares({
+    ...board,
+    currentScore: { xTeam, yTeam },
+    gamePhase: 'in-progress'
+  });
+  const result = {
+    winners,
+    score: { xTeam, yTeam },
+    recordedAt: new Date().toISOString()
+  };
+  if (auto) result.auto = true;
+  return result;
+}
+
+// Live-linked boards record each period the moment ESPN says it's over,
+// using linescores so the score is exact even when the sync lands mid-way
+// through the next quarter. Existing recordings are never overwritten, so
+// a commissioner's manual (re-)record always wins.
+function autoRecordLivePeriods(board, game) {
+  if (!boardHasAxes(board)) return;
+
+  const xSide = board.liveGame?.xTeamSide === 'away' ? 'away' : 'home';
+  const scores = completedPeriodScores(game);
+  board.periodResults = board.periodResults || {};
+
+  for (const [period, score] of Object.entries(scores)) {
+    if (board.periodResults[period]) continue;
+    const xTeam = xSide === 'home' ? score.home : score.away;
+    const yTeam = xSide === 'home' ? score.away : score.home;
+    board.periodResults[period] = buildPeriodResult(board, xTeam, yTeam, true);
+  }
+}
+
 // Pull the latest live score from ESPN into the board
 async function syncBoardLive(board) {
   const game = await getGame(board.liveGame.eventId);
   applyGameToBoard(board, game);
+  autoRecordLivePeriods(board, game);
   await storage.saveBoard(board);
   return game;
 }

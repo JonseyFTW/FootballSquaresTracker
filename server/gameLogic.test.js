@@ -5,6 +5,7 @@ const {
   findWinningSquares,
   checkCurrentWinners,
   calculateWinningScores,
+  latestCompletedPeriod,
   isValidAxisPermutation
 } = require('./gameLogic');
 
@@ -186,4 +187,31 @@ test('isValidAxisPermutation', () => {
   assert.ok(!isValidAxisPermutation([0, 1, 2, 3, 4]));
   assert.ok(!isValidAxisPermutation(null));
   assert.ok(!isValidAxisPermutation('0123456789'));
+});
+
+// ----- latestCompletedPeriod -----
+
+test('latestCompletedPeriod maps single-step phase advances to the finished period', () => {
+  assert.strictEqual(latestCompletedPeriod('1st Quarter', '2nd Quarter'), 'q1');
+  assert.strictEqual(latestCompletedPeriod('2nd Quarter', 'Halftime'), 'half');
+  assert.strictEqual(latestCompletedPeriod('Halftime', '3rd Quarter'), null);
+  assert.strictEqual(latestCompletedPeriod('3rd Quarter', '4th Quarter'), 'q3');
+  assert.strictEqual(latestCompletedPeriod('4th Quarter', 'Final'), 'final');
+  assert.strictEqual(latestCompletedPeriod('4th Quarter', 'Overtime'), null);
+  assert.strictEqual(latestCompletedPeriod('Overtime', 'Final'), 'final');
+});
+
+test('latestCompletedPeriod on a jump records only the boundary the score belongs to', () => {
+  // Skipping halftime: the submitted score is the start-of-3rd score
+  assert.strictEqual(latestCompletedPeriod('2nd Quarter', '3rd Quarter'), 'half');
+  // Jumping straight to Final: only the final score is known
+  assert.strictEqual(latestCompletedPeriod('1st Quarter', 'Final'), 'final');
+  assert.strictEqual(latestCompletedPeriod('pre-game', '1st Quarter'), null);
+});
+
+test('latestCompletedPeriod ignores no-ops, reversals, and unknown phases', () => {
+  assert.strictEqual(latestCompletedPeriod('2nd Quarter', '2nd Quarter'), null);
+  assert.strictEqual(latestCompletedPeriod('Final', '3rd Quarter'), null);
+  assert.strictEqual(latestCompletedPeriod('weird', 'Final'), null);
+  assert.strictEqual(latestCompletedPeriod('1st Quarter', 'nonsense'), null);
 });

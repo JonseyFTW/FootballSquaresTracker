@@ -75,14 +75,49 @@ function simplifyCompetition(competition, fallback = {}) {
     home: {
       name: homeName,
       abbreviation: home.team?.abbreviation || '',
-      score: parseInt(home.score, 10) || 0
+      score: parseInt(home.score, 10) || 0,
+      linescores: readLinescores(home)
     },
     away: {
       name: awayName,
       abbreviation: away.team?.abbreviation || '',
-      score: parseInt(away.score, 10) || 0
+      score: parseInt(away.score, 10) || 0,
+      linescores: readLinescores(away)
     }
   };
+}
+
+// Per-period points as plain numbers ([7, 3, ...]); ESPN omits the array
+// before kickoff and appends entries as periods start.
+function readLinescores(competitor) {
+  if (!Array.isArray(competitor.linescores)) return [];
+  return competitor.linescores.map(l => parseInt(l?.value ?? l?.displayValue, 10) || 0);
+}
+
+// Cumulative score at the end of each period the game has finished, keyed
+// by this app's period names. Built from linescores so it stays correct no
+// matter how late a sync lands (a sync mid-Q2 still yields the exact Q1
+// score). 'final' comes from the live total, which covers overtime without
+// needing OT linescores.
+function completedPeriodScores(game) {
+  const out = {};
+  const post = game.state === 'post';
+  const homeLines = game.home?.linescores || [];
+  const awayLines = game.away?.linescores || [];
+  const sumTo = (lines, n) => lines.slice(0, n).reduce((total, pts) => total + pts, 0);
+
+  const periodDone = (n) =>
+    post || game.period > n || (n === 2 && game.gamePhase === 'Halftime');
+
+  for (const [key, n] of [['q1', 1], ['half', 2], ['q3', 3]]) {
+    if (periodDone(n) && homeLines.length >= n && awayLines.length >= n) {
+      out[key] = { home: sumTo(homeLines, n), away: sumTo(awayLines, n) };
+    }
+  }
+  if (post) {
+    out.final = { home: game.home?.score || 0, away: game.away?.score || 0 };
+  }
+  return out;
 }
 
 function simplifyScoreboard(raw) {
@@ -154,6 +189,7 @@ module.exports = {
   getScoreboard,
   getGame,
   applyGameToBoard,
+  completedPeriodScores,
   espnStatusToGamePhase,
   simplifyCompetition,
   simplifyScoreboard
