@@ -85,7 +85,27 @@ logs — real users can't reset their password.
 4. Redeploy, then verify with "Forgot password?" on your own account — the
    email should arrive
 
-### 6. Optional: AI square-sheet import
+### 6. Marketing emails (weekly board reminders + season-start) — `CRON_SECRET`
+
+A daily Vercel Cron (`vercel.json` → `/api/cron/emails`, 15:00 UTC) decides
+what to send: every **Tuesday** during football season (Aug 1–Feb 15), users
+who have created at least one board get a "this week's games" email featuring
+one matchup; in **early August** (1st–10th), every account gets a one-time
+"football is back" email. Every email carries a signed unsubscribe link
+(honored at `/api/email/unsubscribe`), and nothing sends until email (step 5)
+plus this step are configured:
+
+1. Generate a secret: `openssl rand -hex 32` → add `CRON_SECRET` in Vercel env
+   (Vercel automatically sends it as a bearer token when invoking the cron)
+2. Redeploy so the cron from `vercel.json` registers
+3. Dry-run it any time without sending:
+   `curl -H "Authorization: Bearer $CRON_SECRET" "https://squareszn.com/api/cron/emails?dryRun=1"`
+   → JSON showing today's campaigns, recipient counts, and the featured game
+4. Optional knobs: `EMAIL_DAILY_CAP` (default 1000 — mind Resend's free tier
+   of 100 emails/day before upgrading), `EMAIL_POSTAL_ADDRESS` (shown in the
+   footer; CAN-SPAM asks marketing email to carry a postal address)
+
+### 7. Optional: AI square-sheet import
 
 The "import from image" feature needs one AI provider key; without one, users
 can still paste their own key in the UI. Cheapest hands-off option:
@@ -93,7 +113,7 @@ can still paste their own key in the UI. Cheapest hands-off option:
 `google/gemini-2.5-flash-lite`; override with `OPENROUTER_MODEL` or per-import
 in the UI). Alternatives: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CLAUDE_API_KEY`.
 
-### 7. Optional: receiving email at @squareszn.com
+### 8. Optional: receiving email at @squareszn.com
 
 Resend only **sends**. To receive (e.g. `hello@squareszn.com` → your Gmail),
 use Cloudflare Email Routing — free, and the domain is already on Cloudflare:
@@ -121,4 +141,6 @@ After any change:
 | `APP_URL` | ⚠ confirm | Step 3 |
 | `GOOGLE_CLIENT_ID` | ❌ not set | Step 4 |
 | `RESEND_API_KEY` / `EMAIL_FROM` | ⚠ confirm | Step 5 |
-| `OPENROUTER_API_KEY` (or Gemini/OpenAI/Claude key) | optional | Step 6 |
+| `CRON_SECRET` | ❌ not set | Step 6 — reminder emails stay off until set |
+| `EMAIL_DAILY_CAP` / `EMAIL_POSTAL_ADDRESS` | optional | Step 6 |
+| `OPENROUTER_API_KEY` (or Gemini/OpenAI/Claude key) | optional | Step 7 |

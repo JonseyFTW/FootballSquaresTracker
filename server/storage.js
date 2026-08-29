@@ -115,6 +115,11 @@ async function saveUser(user) {
   upsert('users', user);
 }
 
+async function getAllUsers() {
+  if (usePostgres) return db.getAllUsers();
+  return readCollection('users');
+}
+
 // ----- Leagues -----
 
 async function getLeagueById(id) {
@@ -155,6 +160,7 @@ module.exports = {
   removeBoardById,
   getUserById,
   getUserByEmail,
+  getAllUsers,
   saveUser,
   getLeagueById,
   getLeagueByShareToken,
