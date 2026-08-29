@@ -1096,6 +1096,14 @@ input::placeholder {
   text-align: center;
 }
 
+.board-image-preview {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
 /* ============================================================
    Strip-10 layout
    ============================================================ */

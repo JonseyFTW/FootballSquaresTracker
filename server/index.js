@@ -14,6 +14,7 @@ const { verifyGoogleIdToken } = require('./googleAuth');
 const { computeAnalytics } = require('./analyticsService');
 const {
   shuffle,
+  strip10BlocksFromPermutations,
   generateStrip10Assignments,
   boardHasAxes,
   findWinningSquares,
@@ -718,6 +719,12 @@ app.post('/api/boards', requireAuth, async (req, res) => {
           yDigits: sanitizeDigits(sq.yDigits) || [],
           owner: sanitizeOwner(sq.owner)
         }));
+      } else if (req.body.drawLater) {
+        // Claim-first flow: spots exist with no digits until the group
+        // fills the board and the owner runs (or enters) the draw.
+        for (let i = 0; i < 10; i++) {
+          squares.push({ number: i + 1, xDigits: [], yDigits: [], owner: '' });
+        }
       } else {
         const stripAssignments = generateStrip10Assignments();
         for (let i = 0; i < 10; i++) {
@@ -827,21 +834,33 @@ app.put('/api/boards/:id/draw-axes', async (req, res) => {
     const board = await loadEditableBoard(req, res);
     if (!board) return;
 
-    if (board.type === 'strip-10') {
-      return res.status(400).json({ error: 'Strip boards have digits on squares, not axes' });
-    }
     if (board.gamePhase !== 'pre-game') {
       return res.status(400).json({ error: 'Numbers are locked once the game has started' });
     }
 
     const { runs, xAxis, yAxis, mode } = req.body;
 
+    // Grids take the permutations as their axes; strips derive each
+    // spot's digit groups from the same two rows in reading order, so
+    // the drawn rows fully determine the board either way.
+    const applyPermutations = (xPerm, yPerm) => {
+      if (board.type === 'strip-10') {
+        const blocks = strip10BlocksFromPermutations(xPerm, yPerm);
+        board.squares.forEach((square, i) => {
+          square.xDigits = blocks[i].xDigits;
+          square.yDigits = blocks[i].yDigits;
+        });
+      } else {
+        board.xAxis = xPerm;
+        board.yAxis = yPerm;
+      }
+    };
+
     if (mode === 'manual') {
       if (!isValidAxisPermutation(xAxis) || !isValidAxisPermutation(yAxis)) {
         return res.status(400).json({ error: 'Each axis must contain the digits 0-9 exactly once' });
       }
-      board.xAxis = xAxis.map(Number);
-      board.yAxis = yAxis.map(Number);
+      applyPermutations(xAxis.map(Number), yAxis.map(Number));
       board.drawLog = { mode: 'manual', runs: 0, drawnAt: new Date().toISOString() };
     } else {
       const runCount = parseInt(runs, 10);
@@ -854,8 +873,7 @@ app.put('/api/boards/:id/draw-axes', async (req, res) => {
         history.push({ xAxis: shuffle(digits), yAxis: shuffle(digits) });
       }
       const final = history[history.length - 1];
-      board.xAxis = final.xAxis;
-      board.yAxis = final.yAxis;
+      applyPermutations(final.xAxis, final.yAxis);
       board.drawLog = {
         mode: 'randomized',
         runs: runCount,

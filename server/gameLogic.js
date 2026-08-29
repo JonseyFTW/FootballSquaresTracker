@@ -13,37 +13,45 @@ function shuffle(arr) {
 
 // A strip-10 board must tile all 100 (x,y) last-digit combinations across
 // 10 squares so that every possible score has exactly one winner. Splitting
-// the shuffled x-digits into 2 groups of 5 and the y-digits into 5 groups
-// of 2 makes the ten (xGroup x yGroup) blocks a partition of the space.
-// Dealing digits from repeated pools (the old approach) allowed duplicate
-// digits inside a square and scores with zero or multiple winners.
-function generateStrip10Assignments() {
-  const xDigits = shuffle(DIGITS);
-  const yDigits = shuffle(DIGITS);
-
-  const xGroups = [xDigits.slice(0, 5), xDigits.slice(5)];
+// the x-digit permutation into 2 groups of 5 and the y-permutation into 5
+// pairs makes the ten (xGroup x yGroup) blocks a partition of the space.
+// Blocks land on spots 1-10 in reading order — the layout groups use on
+// paper (spot 1 = first x-group x first y-pair, spot 2 = second x-group x
+// first y-pair, ...) — so two drawn digit rows fully determine every spot.
+function strip10BlocksFromPermutations(xPerm, yPerm) {
+  const xGroups = [xPerm.slice(0, 5), xPerm.slice(5)];
   const yGroups = [];
   for (let i = 0; i < 10; i += 2) {
-    yGroups.push(yDigits.slice(i, i + 2));
+    yGroups.push(yPerm.slice(i, i + 2));
   }
 
   const blocks = [];
-  for (const xGroup of xGroups) {
-    for (const yGroup of yGroups) {
+  for (const yGroup of yGroups) {
+    for (const xGroup of xGroups) {
       blocks.push({
         xDigits: [...xGroup].sort((a, b) => a - b),
         yDigits: [...yGroup].sort((a, b) => a - b)
       });
     }
   }
-
-  return shuffle(blocks);
+  return blocks;
 }
 
-// League boards can exist before their numbers are drawn — no axes
-// means no square covers any digits yet.
+// Creation-time auto-assignment: random permutations AND shuffled spot
+// order (dealing digits from repeated pools — the old approach — allowed
+// duplicate digits inside a square and scores with zero or two winners).
+function generateStrip10Assignments() {
+  return shuffle(strip10BlocksFromPermutations(shuffle(DIGITS), shuffle(DIGITS)));
+}
+
+// Boards can exist before their numbers are drawn — people claim squares
+// first, the digits come later. Grids: no axes yet. Strips: squares
+// without digit groups.
 function boardHasAxes(board) {
-  if (board.type === 'strip-10') return true;
+  if (board.type === 'strip-10') {
+    return (board.squares || []).length > 0 && board.squares.every(sq =>
+      (sq.xDigits || []).length > 0 && (sq.yDigits || []).length > 0);
+  }
   return Array.isArray(board.xAxis) && board.xAxis.length === 10 &&
     Array.isArray(board.yAxis) && board.yAxis.length === 10;
 }
@@ -167,6 +175,7 @@ function isValidAxisPermutation(axis) {
 
 module.exports = {
   shuffle,
+  strip10BlocksFromPermutations,
   generateStrip10Assignments,
   boardHasAxes,
   getSquareDigits,

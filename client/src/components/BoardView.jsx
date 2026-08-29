@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
 import { useTitle } from '../useTitle'
+import { renderBoardImage } from '../boardImage'
 
 const PERIODS = [
   { key: 'q1', label: '1st Quarter' },
@@ -17,6 +18,12 @@ const parseSquareNumbers = (input) =>
 const parseDigitList = (input) =>
   [...new Set(input.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n) && n >= 0 && n <= 9))]
     .sort((a, b) => a - b)
+
+// A strip board is "drawn" once every spot has its digit groups; before
+// that, people claim spots with no numbers showing.
+const stripDigitsAssigned = (board) =>
+  (board.squares || []).length > 0 &&
+  board.squares.every(sq => (sq.xDigits || []).length > 0 && (sq.yDigits || []).length > 0)
 
 // shareMode: reached via /share/:token — read-only, uses share endpoints
 function BoardView({ shareMode = false }) {
@@ -41,6 +48,10 @@ function BoardView({ shareMode = false }) {
   const [recordingPeriod, setRecordingPeriod] = useState(null)
   const [leagueMembers, setLeagueMembers] = useState([])
   const [copied, setCopied] = useState(false)
+
+  // Shareable board picture for posting to the group
+  const [shareImageUrl, setShareImageUrl] = useState(null)
+  const [imageNote, setImageNote] = useState(null)
 
   // Live NFL game sync
   const [showLinkModal, setShowLinkModal] = useState(false)
@@ -399,6 +410,34 @@ function BoardView({ shareMode = false }) {
     }
   }
 
+  // ----- Shareable board image -----
+
+  const openBoardImage = () => {
+    setImageNote(null)
+    setShareImageUrl(renderBoardImage(board).toDataURL('image/png'))
+  }
+
+  const saveBoardImage = () => {
+    const link = document.createElement('a')
+    link.href = shareImageUrl
+    link.download = `${(board.name || 'squares-board').replace(/[^\w\- ]+/g, '').trim() || 'squares-board'}.png`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setImageNote('Saved! On iPhone it lands in Files — or press and hold the image to save to Photos.')
+  }
+
+  const copyBoardImage = async () => {
+    try {
+      const canvas = renderBoardImage(board)
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      setImageNote('Copied! Paste it straight into your group post.')
+    } catch (err) {
+      setImageNote("Couldn't copy here — press and hold the image, then Copy or Save.")
+    }
+  }
+
   const updateScore = async () => {
     const x = parseInt(scoreX, 10)
     const y = parseInt(scoreY, 10)
@@ -441,7 +480,9 @@ function BoardView({ shareMode = false }) {
     if (!editingSquare) return
 
     const body = { owner: editOwnerValue }
-    if (board.type === 'strip-10') {
+    // Digit fields only exist once the strip's numbers are drawn; before
+    // that, editing a square just claims or renames its owner.
+    if (board.type === 'strip-10' && stripDigitsAssigned(board)) {
       const xDigits = parseDigitList(editXDigits)
       const yDigits = parseDigitList(editYDigits)
       if (xDigits.length === 0 || yDigits.length === 0) {
@@ -552,7 +593,9 @@ function BoardView({ shareMode = false }) {
 
   const gridSize = board.type === '5x5' ? 5 : 10
   const isPreGame = board.gamePhase === 'pre-game'
-  const axesDrawn = board.type === 'strip-10' || (board.xAxis || []).length === 10
+  const axesDrawn = board.type === 'strip-10'
+    ? stripDigitsAssigned(board)
+    : (board.xAxis || []).length === 10
   const memberNames = leagueMembers.map(m => m.name)
 
   const winnerLabel = (num) => {
@@ -579,11 +622,11 @@ function BoardView({ shareMode = false }) {
               <div className="strip-digits">
                 <div className="strip-digit-group x-digits">
                   <span className="digit-label">{board.xTeamName}:</span>
-                  <span className="digit-values">{(square.xDigits || []).join(', ')}</span>
+                  <span className="digit-values">{(square.xDigits || []).join(', ') || '?, ?, ?, ?, ?'}</span>
                 </div>
                 <div className="strip-digit-group y-digits">
                   <span className="digit-label">{board.yTeamName}:</span>
-                  <span className="digit-values">{(square.yDigits || []).join(', ')}</span>
+                  <span className="digit-values">{(square.yDigits || []).join(', ') || '?, ?'}</span>
                 </div>
               </div>
               <div className="strip-owner">
@@ -672,7 +715,7 @@ function BoardView({ shareMode = false }) {
     ))
   }
 
-  const drawLogLine = board.drawLog && axesDrawn && board.type !== 'strip-10' ? (
+  const drawLogLine = board.drawLog && axesDrawn ? (
     board.drawLog.mode === 'randomized'
       ? `Numbers drawn on-site with ${board.drawLog.runs} randomization${board.drawLog.runs === 1 ? '' : 's'} · ${new Date(board.drawLog.drawnAt).toLocaleString()}`
       : null
@@ -702,6 +745,11 @@ function BoardView({ shareMode = false }) {
         {canEdit && shareUrl && (
           <button className="btn btn-secondary btn-small" onClick={copyShareLink}>
             {copied ? '✓ Copied!' : '🔗 Copy Share Link'}
+          </button>
+        )}
+        {canEdit && (
+          <button className="btn btn-secondary btn-small" onClick={openBoardImage}>
+            🖼 Board Image
           </button>
         )}
       </div>
@@ -739,7 +787,7 @@ function BoardView({ shareMode = false }) {
       {!axesDrawn && (
         <div className="draw-banner">
           <span>
-            🎲 Numbers haven't been drawn yet — squares get claimed first, then the columns and rows are randomized.
+            🎲 Numbers haven't been drawn yet — squares get claimed first, then the numbers are randomized.
           </span>
           {canEdit && isPreGame && (
             <button className="btn btn-primary btn-small" onClick={() => { setShowDrawModal(true); setDrawError(null) }}>
@@ -754,10 +802,13 @@ function BoardView({ shareMode = false }) {
           <div className="strip-wrapper">
             <div className="strip-header">
               <span className="strip-info">
-                Each square covers 5 {board.xTeamName} digits and 2 {board.yTeamName} digits (10 winning combinations per square)
+                {axesDrawn
+                  ? `Each square covers 5 ${board.xTeamName} digits and 2 ${board.yTeamName} digits (10 winning combinations per square)`
+                  : 'Claim a square now — its 5 + 2 winning digits get drawn once the board is full'}
               </span>
             </div>
             {renderStripGrid()}
+            {drawLogLine && <p className="draw-provenance">🎲 {drawLogLine}</p>}
           </div>
         ) : (
           <div className="grid-wrapper">
@@ -1122,6 +1173,13 @@ function BoardView({ shareMode = false }) {
                         ))}
                       </div>
                     </div>
+                    {board.type === 'strip-10' && (
+                      <p className="live-hint" style={{ marginBottom: '15px' }}>
+                        Enter both rows exactly as your draw produced them. Squares fill in reading
+                        order: #1 gets the first five {board.xTeamName} digits and the first {board.yTeamName} pair,
+                        #2 gets the last five with that pair, and so on down the pairs.
+                      </p>
+                    )}
                   </>
                 )}
 
@@ -1227,6 +1285,24 @@ function BoardView({ shareMode = false }) {
         )
       })()}
 
+      {/* Shareable board image */}
+      {shareImageUrl && (
+        <div className="modal-overlay" onClick={() => setShareImageUrl(null)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>Post this board to your group</h3>
+            <img src={shareImageUrl} alt={`${board.name} board`} className="board-image-preview" />
+            <p className="live-hint" style={{ marginBottom: '12px' }}>
+              {imageNote || 'Save or copy it, then upload to your Facebook group — on a phone you can also just press and hold the image.'}
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setShareImageUrl(null)}>Close</button>
+              <button className="btn btn-secondary" onClick={copyBoardImage}>📋 Copy</button>
+              <button className="btn btn-primary" onClick={saveBoardImage}>⬇ Save Image</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Square Modal */}
       {editingSquare && (
         <div className="modal-overlay" onClick={closeSquareEditor}>
@@ -1247,7 +1323,7 @@ function BoardView({ shareMode = false }) {
                 {memberNames.map(name => <option key={name} value={name} />)}
               </datalist>
             )}
-            {board.type === 'strip-10' && (
+            {board.type === 'strip-10' && (axesDrawn ? (
               <>
                 <label className="modal-label">{board.xTeamName} digits (usually 5)</label>
                 <input
@@ -1264,7 +1340,9 @@ function BoardView({ shareMode = false }) {
                   onChange={(e) => setEditYDigits(e.target.value)}
                 />
               </>
-            )}
+            ) : (
+              <p className="live-hint">This square's winning digits get assigned when the numbers are drawn.</p>
+            ))}
             {editError && <div className="modal-error">{editError}</div>}
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={closeSquareEditor}>
