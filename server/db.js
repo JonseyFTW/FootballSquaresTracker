@@ -126,6 +126,12 @@ async function getLeagueByShareToken(token) {
   return result.rows[0].data;
 }
 
+async function getAllLeagues() {
+  await ensureDB();
+  const result = await sql`SELECT data FROM leagues ORDER BY created_at DESC`;
+  return result.rows.map(r => r.data);
+}
+
 async function getLeaguesByOwnerId(ownerId) {
   await ensureDB();
   const result = await sql`
@@ -162,6 +168,7 @@ module.exports = {
   saveUser,
   getLeague,
   getLeagueByShareToken,
+  getAllLeagues,
   getLeaguesByOwnerId,
   saveLeague,
   deleteLeague

@@ -118,6 +118,11 @@ function BoardList() {
                   <span className="team-badge y-team">{board.yTeamName}</span>
                   {inProgress && <span className="team-badge phase">{board.gamePhase}</span>}
                   {board.leagueName && <span className="team-badge league">{board.leagueName}</span>}
+                  {(board.requests || []).filter(r => r.status === 'pending').length > 0 && (
+                    <span className="team-badge requests">
+                      {(board.requests || []).filter(r => r.status === 'pending').length} request{(board.requests || []).filter(r => r.status === 'pending').length === 1 ? '' : 's'} waiting
+                    </span>
+                  )}
                 </div>
               </div>
               <button

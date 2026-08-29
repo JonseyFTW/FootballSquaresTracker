@@ -82,18 +82,43 @@ function Leagues() {
         </form>
       </div>
 
-      {leagues.length > 0 && (
+      {leagues.filter(l => l.role !== 'member').length > 0 && (
         <div className="board-list" style={{ maxWidth: '700px', margin: '0 auto' }}>
-          {leagues.map(league => (
+          {leagues.filter(l => l.role !== 'member').map(league => (
             <div key={league.id} className="board-card" onClick={() => navigate(`/league/${league.id}`)}>
-              <h3>{league.name}</h3>
+              <h3>
+                {league.name}
+                {league.pendingJoinCount > 0 && (
+                  <span className="pending-pill"> {league.pendingJoinCount} join request{league.pendingJoinCount === 1 ? '' : 's'}</span>
+                )}
+              </h3>
               {league.description && <p>{league.description}</p>}
               <p style={{ marginTop: '6px' }}>
-                {(league.members || []).length} member{(league.members || []).length === 1 ? '' : 's'} ·
+                {(league.joinedMembers || []).filter(m => m.status === 'active').length + (league.members || []).length} member{((league.joinedMembers || []).filter(m => m.status === 'active').length + (league.members || []).length) === 1 ? '' : 's'} ·
                 created {new Date(league.createdAt).toLocaleDateString()}
               </p>
             </div>
           ))}
+        </div>
+      )}
+
+      {leagues.some(l => l.role === 'member') && (
+        <div style={{ maxWidth: '700px', margin: '30px auto 0' }}>
+          <h3 style={{ fontWeight: 800, marginBottom: '12px' }}>Leagues you've joined</h3>
+          <div className="board-list">
+            {leagues.filter(l => l.role === 'member').map(league => (
+              <div key={league.id} className="board-card" onClick={() => navigate(`/league/share/${league.shareToken}`)}>
+                <h3>
+                  {league.name}
+                  {league.membership === 'pending' && <span className="pending-pill"> approval pending</span>}
+                </h3>
+                {league.description && <p>{league.description}</p>}
+                <p style={{ marginTop: '6px' }}>
+                  Run by {league.ownerName || 'the commissioner'} — tap to see this week's boards
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

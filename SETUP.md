@@ -114,7 +114,20 @@ redeploy. Unset means nobody is an admin; everyone else who tries the URL
 is bounced to their boards. After signing in, admins also get a "Pricing
 Lab" link in the site footer.
 
-### 8. Optional: AI square-sheet import
+### 8. Game-day push notifications — VAPID keys
+
+Members can turn on push notifications ("your square was approved", waitlist
+offers). Until the keys exist the 🔔 button simply doesn't appear — nothing
+breaks. On iPhone, push only works once the site is added to the Home Screen
+(iOS 16.4+), which the install banner already drives.
+
+1. Generate a key pair (one time): `npx web-push generate-vapid-keys`
+2. Set in Vercel env → redeploy:
+   - `VAPID_PUBLIC_KEY` = the public key
+   - `VAPID_PRIVATE_KEY` = the private key
+   - `VAPID_SUBJECT` = `mailto:you@squareszn.com` (any contact address)
+
+### 9. Optional: AI square-sheet import
 
 The "import from image" feature needs one AI provider key; without one, users
 can still paste their own key in the UI. Cheapest hands-off option:
@@ -122,7 +135,7 @@ can still paste their own key in the UI. Cheapest hands-off option:
 `google/gemini-2.5-flash-lite`; override with `OPENROUTER_MODEL` or per-import
 in the UI). Alternatives: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CLAUDE_API_KEY`.
 
-### 9. Optional: receiving email at @squareszn.com
+### 10. Optional: receiving email at @squareszn.com
 
 Resend only **sends**. To receive (e.g. `hello@squareszn.com` → your Gmail),
 use Cloudflare Email Routing — free, and the domain is already on Cloudflare:
@@ -153,4 +166,5 @@ After any change:
 | `CRON_SECRET` | ❌ not set | Step 6 — reminder emails stay off until set |
 | `EMAIL_DAILY_CAP` / `EMAIL_POSTAL_ADDRESS` | optional | Step 6 |
 | `ADMIN_EMAILS` | ❌ not set | Step 7 — Pricing Lab stays hidden until set |
-| `OPENROUTER_API_KEY` (or Gemini/OpenAI/Claude key) | optional | Step 8 |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | ❌ not set | Step 8 — push stays off until set |
+| `OPENROUTER_API_KEY` (or Gemini/OpenAI/Claude key) | optional | Step 9 |

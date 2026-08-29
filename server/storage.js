@@ -139,6 +139,11 @@ async function getLeaguesByOwnerId(ownerId) {
   return readCollection('leagues').filter(l => l.ownerId === ownerId);
 }
 
+async function getAllLeagues() {
+  if (usePostgres) return db.getAllLeagues();
+  return readCollection('leagues');
+}
+
 async function saveLeague(league) {
   if (usePostgres) return db.saveLeague(league);
   upsert('leagues', league);
@@ -164,6 +169,7 @@ module.exports = {
   saveUser,
   getLeagueById,
   getLeagueByShareToken,
+  getAllLeagues,
   getLeaguesByOwnerId,
   saveLeague,
   removeLeagueById
