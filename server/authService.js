@@ -140,6 +140,26 @@ function verifyResetToken(token) {
   return { userId: payload.uid, pwv: payload.pwv };
 }
 
+// ---------------------------------------------------------------
+// Unsubscribe tokens: long-lived (links in old emails must keep
+// working), purpose-bound so they can never act as a session.
+// ---------------------------------------------------------------
+const UNSUB_TTL_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+
+function signUnsubscribeToken(userId) {
+  return signPayload({
+    uid: userId,
+    purpose: 'unsub',
+    exp: Date.now() + UNSUB_TTL_MS
+  });
+}
+
+function verifyUnsubscribeToken(token) {
+  const payload = verifyPayload(token);
+  if (!payload || payload.purpose !== 'unsub' || !payload.uid) return null;
+  return { userId: payload.uid };
+}
+
 function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -163,6 +183,8 @@ module.exports = {
   verifyToken,
   signResetToken,
   verifyResetToken,
+  signUnsubscribeToken,
+  verifyUnsubscribeToken,
   passwordVersion,
   normalizeEmail,
   isValidEmail,

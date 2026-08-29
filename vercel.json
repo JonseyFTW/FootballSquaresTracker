@@ -11,5 +11,8 @@
     "api/index.js": {
       "maxDuration": 30
     }
-  }
+  },
+  "crons": [
+    { "path": "/api/cron/emails", "schedule": "0 15 * * *" }
+  ]
 }

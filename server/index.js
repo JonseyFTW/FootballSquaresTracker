@@ -2,12 +2,14 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { parseImage, DEFAULT_OPENROUTER_MODEL } = require('./llmService');
 const { getScoreboard, getGame, applyGameToBoard } = require('./nflService');
 const storage = require('./storage');
 const auth = require('./authService');
 const { sendPasswordResetEmail } = require('./emailService');
+const { runDailyCampaigns } = require('./emailCampaigns');
 const { verifyGoogleIdToken } = require('./googleAuth');
 const { computeAnalytics } = require('./analyticsService');
 const {
@@ -75,6 +77,13 @@ function requireAuth(req, res, next) {
 function canEditBoard(board, user) {
   if (!board.ownerId) return true;
   return !!user && user.id === board.ownerId;
+}
+
+// Public origin for links in emails (APP_URL wins so links never point
+// at a preview deployment's hostname).
+function getOrigin(req) {
+  return process.env.APP_URL ||
+    `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.headers.host}`;
 }
 
 // ============================================================
@@ -269,9 +278,7 @@ app.post('/api/auth/forgot', async (req, res) => {
     await storage.saveUser(user);
 
     const token = auth.signResetToken(user.id, user.passwordHash);
-    const origin = process.env.APP_URL ||
-      `${req.headers['x-forwarded-proto'] || req.protocol}://${req.headers['x-forwarded-host'] || req.headers.host}`;
-    const resetUrl = `${origin}/reset?token=${encodeURIComponent(token)}`;
+    const resetUrl = `${getOrigin(req)}/reset?token=${encodeURIComponent(token)}`;
 
     try {
       const result = await sendPasswordResetEmail(user.email, resetUrl);
@@ -323,6 +330,87 @@ app.post('/api/auth/reset', async (req, res) => {
     res.status(500).json({ error: 'Failed to reset password' });
   }
 });
+
+// ============================================================
+// Email campaigns (weekly board reminders, season-start)
+// ============================================================
+
+// Hit daily by Vercel Cron (vercel.json "crons"). Vercel sends
+// "Authorization: Bearer $CRON_SECRET" automatically when the env var is
+// set; unset means the endpoint stays off. ?dryRun=1 reports who would
+// get what today without sending or recording anything.
+app.get('/api/cron/emails', async (req, res) => {
+  try {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) {
+      return res.status(503).json({ error: 'CRON_SECRET is not configured' });
+    }
+    const header = Buffer.from(req.headers.authorization || '');
+    const expected = Buffer.from(`Bearer ${secret}`);
+    if (header.length !== expected.length || !crypto.timingSafeEqual(header, expected)) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const result = await runDailyCampaigns({
+      origin: getOrigin(req),
+      dryRun: req.query.dryRun === '1'
+    });
+    res.json(result);
+  } catch (error) {
+    console.error('Email campaign run failed:', error);
+    res.status(500).json({ error: 'Email campaign run failed' });
+  }
+});
+
+// Unsubscribe link target. GET renders a small confirmation page (that's
+// what mail clients open); POST handles RFC 8058 one-click unsubscribe.
+// The signed token identifies the user, so this needs no session.
+async function handleUnsubscribe(req, res) {
+  const wantsHtml = req.method === 'GET';
+  const page = (title, message) => `<!doctype html>
+    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title} — SquareSZN</title></head>
+    <body style="margin:0;background:#070b14;color:#f1f5f9;font-family:Arial,Helvetica,sans-serif;display:flex;justify-content:center;padding:60px 20px">
+      <div style="max-width:420px;text-align:center">
+        <p style="font-size:20px;font-weight:bold">🏈 Square<span style="color:#ff5a28">SZN</span></p>
+        <h2 style="margin:18px 0 10px">${title}</h2>
+        <p style="color:#94a3b8;line-height:1.6">${message}</p>
+        <p style="margin-top:26px"><a href="/" style="color:#ff7a18;font-weight:bold">Back to SquareSZN</a></p>
+      </div>
+    </body></html>`;
+
+  const fail = () => wantsHtml
+    ? res.status(400).send(page('Link expired', 'This unsubscribe link is invalid or expired. Use the link from a more recent email.'))
+    : res.status(400).json({ error: 'Invalid unsubscribe token' });
+
+  try {
+    const payload = auth.verifyUnsubscribeToken(req.query.token);
+    if (!payload) return fail();
+
+    const user = await storage.getUserById(payload.userId);
+    if (!user) return fail();
+
+    const resubscribe = req.query.action === 'resubscribe';
+    user.emailOptOut = !resubscribe;
+    await storage.saveUser(user);
+
+    if (!wantsHtml) return res.json({ ok: true });
+
+    if (resubscribe) {
+      return res.send(page("You're back in", "We'll keep sending you the weekly board reminders during football season."));
+    }
+    const resubUrl = `/api/email/unsubscribe?token=${encodeURIComponent(req.query.token)}&action=resubscribe`;
+    return res.send(page(
+      "You're unsubscribed",
+      `No more reminder emails from SquareSZN. Password resets still work. Changed your mind? <a href="${resubUrl}" style="color:#ff7a18">Resubscribe</a>.`
+    ));
+  } catch (error) {
+    console.error('Unsubscribe failed:', error);
+    return fail();
+  }
+}
+
+app.get('/api/email/unsubscribe', handleUnsubscribe);
+app.post('/api/email/unsubscribe', handleUnsubscribe);
 
 // Save/update the squares a user is tracking on a board (their "entry"
 // in that game). Empty squares removes the entry.

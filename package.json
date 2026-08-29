@@ -9,7 +9,7 @@
     "client": "cd client && npm run dev",
     "build": "cd client && npm run build",
     "start": "cross-env NODE_ENV=production node server/index.js",
-    "test": "node --test server/gameLogic.test.js server/llmService.test.js server/nflService.test.js server/authService.test.js server/analyticsService.test.js server/googleAuth.test.js",
+    "test": "node --test server/gameLogic.test.js server/llmService.test.js server/nflService.test.js server/authService.test.js server/analyticsService.test.js server/googleAuth.test.js server/emailCampaigns.test.js",
     "install:all": "npm install && cd client && npm install"
   },
   "dependencies": {

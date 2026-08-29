@@ -95,6 +95,12 @@ async function getUserByEmail(email) {
   return result.rows[0].data;
 }
 
+async function getAllUsers() {
+  await ensureDB();
+  const result = await sql`SELECT data FROM users ORDER BY created_at ASC`;
+  return result.rows.map(r => r.data);
+}
+
 async function saveUser(user) {
   await ensureDB();
   await sql`
@@ -152,6 +158,7 @@ module.exports = {
   getBoardsByLeagueId,
   getUser,
   getUserByEmail,
+  getAllUsers,
   saveUser,
   getLeague,
   getLeagueByShareToken,
