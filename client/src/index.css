@@ -45,6 +45,10 @@
 
 html {
   scroll-behavior: smooth;
+  /* Nothing may drag the page wider than the phone screen; hidden is the
+     fallback for browsers without overflow: clip */
+  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -642,12 +646,15 @@ input, select, textarea {
 .phase-select,
 .game-date-row input[type="date"] {
   width: 100%;
+  min-width: 0;
   padding: 12px 15px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   background: rgba(2, 6, 16, 0.5);
   color: var(--text-1);
-  font-size: 0.95rem;
+  /* Never below 16px: smaller text makes iOS zoom the page in when a field
+     is focused, and the page stays zoomed with the right edge cut off */
+  font-size: 1rem;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -689,6 +696,13 @@ input::placeholder {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 15px;
+}
+
+/* Text inputs report a large intrinsic width; without this the 1fr/1fr
+   grids refuse to shrink and push the whole page wider than the viewport */
+.form-row > *,
+.score-controls > * {
+  min-width: 0;
 }
 
 .axis-input-group {
@@ -823,7 +837,7 @@ input::placeholder {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 34px;
+  gap: clamp(18px, 6vw, 34px);
   margin-bottom: 14px;
 }
 
@@ -1246,6 +1260,7 @@ input::placeholder {
 
 .my-squares-input input {
   flex: 1;
+  min-width: 0;
 }
 
 .my-squares-input .btn {
@@ -2029,6 +2044,8 @@ input::placeholder {
 .board-title-row h2 {
   font-weight: 800;
   letter-spacing: -0.02em;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .board-league-tag {
@@ -2282,6 +2299,7 @@ input::placeholder {
 
 .api-key-input input {
   flex: 1;
+  min-width: 0;
 }
 
 .btn-icon {
@@ -2457,6 +2475,85 @@ input::placeholder {
 }
 
 /* ============================================================
+   Add-to-Home-Screen banner (iPhone)
+   ============================================================ */
+
+.install-banner {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 900;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  background: rgba(13, 20, 36, 0.97);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  animation: rise 0.35s ease both;
+}
+
+.install-banner-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  font-size: 1.35rem;
+  border-radius: 12px;
+  background: var(--grad-primary);
+  box-shadow: var(--glow-orange);
+}
+
+.install-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.install-banner-title {
+  display: block;
+  font-weight: 700;
+  font-size: 0.92rem;
+  margin-bottom: 3px;
+}
+
+.install-banner-text p {
+  color: var(--text-2);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.install-banner-text p strong {
+  color: var(--text-1);
+}
+
+.share-glyph {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  color: var(--y-color);
+}
+
+.install-banner-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+
+.install-banner-close:hover {
+  color: var(--text-1);
+}
+
+/* ============================================================
    Animations & responsive
    ============================================================ */
 
@@ -2516,19 +2613,44 @@ input::placeholder {
     gap: 12px;
   }
 
+  .logo {
+    flex-shrink: 0;
+  }
+
   .logo-word {
     font-size: 0.94rem;
   }
 
+  /* One symmetric row: every link gets an equal share instead of a
+     lopsided 3 + 1 wrap */
   .nav {
     order: 3;
     width: 100%;
-    justify-content: center;
-    margin-right: 0;
+    max-width: 520px;
+    margin: 0 auto;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .nav-link {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 4px;
+    font-size: 0.82rem;
+    text-align: center;
+    white-space: nowrap;
   }
 
   .account-bar {
     margin-left: auto;
+    min-width: 0;
+    gap: 12px;
+  }
+
+  .account-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .site-footer {

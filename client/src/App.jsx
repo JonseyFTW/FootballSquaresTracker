@@ -10,6 +10,7 @@ import Leagues from './components/Leagues'
 import LeagueView from './components/LeagueView'
 import LeagueShare from './components/LeagueShare'
 import Analytics from './components/Analytics'
+import InstallBanner from './components/InstallBanner'
 import { useAuth } from './AuthContext'
 
 function RequireAuth({ children }) {
@@ -105,6 +106,8 @@ function App() {
         </nav>
         <span className="footer-note">Live scores courtesy of ESPN's public scoreboard</span>
       </footer>
+
+      <InstallBanner />
     </div>
   )
 }
