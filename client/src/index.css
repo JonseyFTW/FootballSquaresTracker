@@ -2483,6 +2483,206 @@ input::placeholder {
 }
 
 /* ============================================================
+   Claiming: requests, membership, waitlist, payment
+   ============================================================ */
+
+.claim-note {
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  color: #a7f3d0;
+  padding: 11px 15px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.member-banner {
+  background: rgba(52, 211, 153, 0.09);
+  border-color: rgba(52, 211, 153, 0.35);
+  color: #d1fae5;
+}
+
+.live-badge.open-badge {
+  background: rgba(52, 211, 153, 0.16);
+  color: var(--green);
+}
+
+.pending-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255, 122, 24, 0.16);
+  color: var(--x-color);
+  vertical-align: 2px;
+}
+
+.team-badge.requests {
+  background: rgba(255, 122, 24, 0.16);
+  color: var(--x-color);
+}
+
+/* squares someone is holding with a pending request */
+.square.requested, .strip-square.requested {
+  opacity: 0.75;
+}
+
+.square.mine-pending {
+  background: rgba(255, 122, 24, 0.28);
+  box-shadow: inset 0 0 0 2px rgba(255, 122, 24, 0.6);
+}
+
+.strip-square.mine-pending {
+  border-color: rgba(255, 122, 24, 0.65);
+  background: rgba(255, 122, 24, 0.08);
+}
+
+.request-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.request-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: rgba(2, 6, 16, 0.45);
+  border: 1px solid rgba(255, 122, 24, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.request-info {
+  font-size: 0.88rem;
+  color: var(--text-2);
+  min-width: 0;
+  word-break: break-word;
+}
+
+.request-info strong { color: var(--text-1); }
+
+.member-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.btn-record.accept {
+  background: rgba(52, 211, 153, 0.16);
+  border-color: rgba(52, 211, 153, 0.45);
+  color: var(--green);
+}
+
+.roster-row.pending-row { border-color: rgba(255, 122, 24, 0.4); }
+
+.pay-method-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pay-method-form select {
+  width: auto;
+  padding: 10px 8px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(2, 6, 16, 0.5);
+  color: var(--text-1);
+  font-size: 1rem;
+}
+
+.pay-method-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(2, 6, 16, 0.5);
+  color: var(--text-1);
+  font-size: 1rem;
+}
+
+/* payment panel with the QR */
+.pay-owe {
+  font-size: 0.92rem;
+  color: var(--text-2);
+  margin-bottom: 12px;
+}
+
+.pay-owe strong { color: var(--green); font-size: 1.05rem; }
+
+.pay-body {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pay-qr-tile {
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 8px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.pay-qr { display: block; border-radius: 6px; }
+
+.pay-qr-label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #0b1120;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 0 4px;
+}
+
+.pay-methods { flex: 1; min-width: 180px; }
+
+.pay-method {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.pay-method-type {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  min-width: 62px;
+}
+
+.pay-method a { color: var(--primary-1); font-weight: 700; }
+
+.pay-hide {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 14px;
+  font-size: 0.78rem;
+  color: var(--text-3);
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.pay-hide input { margin-top: 2px; accent-color: var(--primary-1); }
+
+/* ============================================================
    Pricing Lab (admin-only)
    ============================================================ */
 

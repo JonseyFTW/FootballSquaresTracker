@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import { apiFetch } from '../api'
 import { useAuth } from '../AuthContext'
 import { useTitle } from '../useTitle'
 import { renderBoardImage } from '../boardImage'
+import PaymentPanel from './PaymentPanel'
+import { pushSupported, getPushState, enablePush } from '../push'
 
 const PERIODS = [
   { key: 'q1', label: '1st Quarter' },
@@ -29,6 +31,8 @@ const stripDigitsAssigned = (board) =>
 function BoardView({ shareMode = false }) {
   const { id, token } = useParams()
   const { user } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [board, setBoard] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -52,6 +56,12 @@ function BoardView({ shareMode = false }) {
   // Shareable board picture for posting to the group
   const [shareImageUrl, setShareImageUrl] = useState(null)
   const [imageNote, setImageNote] = useState(null)
+
+  // Member claiming (share view): requests, waitlist, payment, push
+  const [requestNote, setRequestNote] = useState(null)
+  const [showPayModal, setShowPayModal] = useState(false)
+  const [payHidden, setPayHidden] = useState(false)
+  const [pushState, setPushState] = useState(null) // null: unavailable · false: off · true: on
 
   // Live NFL game sync
   const [showLinkModal, setShowLinkModal] = useState(false)
@@ -410,6 +420,128 @@ function BoardView({ shareMode = false }) {
     }
   }
 
+  // ----- Member claiming (share view) -----
+
+  const viewer = board?.viewer || null
+  const paymentHiddenPref = (leagueId) =>
+    payHidden || !!user?.prefs?.hidePaymentInfo?.[leagueId]
+
+  useEffect(() => {
+    if (shareMode && user && pushSupported()) {
+      getPushState().then(setPushState).catch(() => setPushState(null))
+    }
+  }, [shareMode, user])
+
+  const requestSquare = async (squareNumber) => {
+    setRequestNote(null)
+    const { ok, data } = await apiFetch(`/api/share/${token}/requests`, {
+      method: 'POST',
+      body: JSON.stringify({ squareNumber })
+    })
+    if (!ok) {
+      setRequestNote(data.error || 'Request failed — try again')
+      if (data.membershipPending) fetchBoard()
+      return
+    }
+    setBoard(data.board)
+    if (data.accepted) {
+      setRequestNote(`🎉 Square #${squareNumber} is yours! It's already on your tracked squares.`)
+      const mine = data.board.viewer?.mySquares || []
+      if (mine.length > 0) {
+        setMySquares(mine.join(', '))
+        trackSquares(mine.join(','), data.board)
+      }
+      if (data.board.viewer?.payment && !paymentHiddenPref(data.board.viewer.payment.leagueId)) {
+        setShowPayModal(true)
+      }
+    } else {
+      setRequestNote(`Requested square #${squareNumber} — the commissioner will approve it, and it's yours the moment they do.`)
+    }
+  }
+
+  const cancelRequest = async (squareNumber) => {
+    const { ok, data } = await apiFetch(`/api/share/${token}/requests/${squareNumber}`, { method: 'DELETE' })
+    if (ok) {
+      setBoard(data.board)
+      setRequestNote(`Cancelled your request for square #${squareNumber}.`)
+    }
+  }
+
+  const toggleWaitlist = async () => {
+    const method = viewer?.onWaitlist ? 'DELETE' : 'POST'
+    const { ok, data } = await apiFetch(`/api/share/${token}/waitlist`, { method })
+    if (ok) {
+      setBoard(data.board)
+      setRequestNote(method === 'POST'
+        ? "You're on the waitlist — if a square opens up, you're first in line."
+        : 'You left the waitlist.')
+    } else {
+      setRequestNote(data.error || 'Waitlist update failed')
+    }
+  }
+
+  const pendingBySquare = useMemo(() => {
+    const map = {}
+    for (const request of viewer?.requests || []) map[request.squareNumber] = request
+    return map
+  }, [board])
+
+  const claimingOpen = shareMode && viewer && viewer.claimMode !== 'admin' && board?.gamePhase === 'pre-game'
+
+  // One tap on a square: owners edit, members claim
+  const handleSquareTap = (square) => {
+    if (canEdit) return openSquareEditor(square)
+    if (!claimingOpen || square.owner) return
+    if (!user) {
+      navigate(`/login?next=${encodeURIComponent(location.pathname)}`)
+      return
+    }
+    const pending = pendingBySquare[square.number]
+    if (pending) {
+      if (pending.mine && confirm(`Cancel your request for square #${square.number}?`)) {
+        cancelRequest(square.number)
+      }
+      return
+    }
+    if (viewer.membership === 'pending') {
+      setRequestNote('Your join request is still waiting on the commissioner — squares unlock once they approve you.')
+      return
+    }
+    const prompt = viewer.claimMode === 'auto'
+      ? `Take square #${square.number}? It's yours instantly.`
+      : `Request square #${square.number}? The commissioner approves requests.`
+    if (confirm(prompt)) requestSquare(square.number)
+  }
+
+  const decideRequest = async (requestId, action) => {
+    const { ok, data } = await apiFetch(`/api/boards/${id}/requests/${requestId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action })
+    })
+    if (ok) setBoard(data)
+    else if (data.board) setBoard(data.board)
+  }
+
+  const duplicateBoard = async () => {
+    const name = prompt('Name for the new board:', board.name)
+    if (name === null) return
+    const { ok, data } = await apiFetch(`/api/boards/${id}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    })
+    if (ok) navigate(`/board/${data.id}`)
+  }
+
+  const turnOnPush = async () => {
+    try {
+      await enablePush()
+      setPushState(true)
+      setRequestNote("🔔 You'll get a notification when your squares are approved or you're winning.")
+    } catch (err) {
+      setRequestNote(err.message || 'Could not enable notifications')
+    }
+  }
+
   // ----- Shareable board image -----
 
   const openBoardImage = () => {
@@ -609,12 +741,14 @@ function BoardView({ shareMode = false }) {
         {board.squares.map((square) => {
           const isHighlighted = mySquareNumbers.includes(square.number)
           const isWinning = winningSquares.includes(square.number)
+          const pending = pendingBySquare[square.number]
+          const claimable = claimingOpen && !square.owner && !pending
 
           return (
             <div
               key={`square-${square.number}`}
-              className={`strip-square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''} ${canEdit ? '' : 'no-edit'}`}
-              onClick={() => openSquareEditor(square)}
+              className={`strip-square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''} ${canEdit || claimable || pending?.mine ? '' : 'no-edit'} ${pending ? (pending.mine ? 'mine-pending' : 'requested') : ''}`}
+              onClick={() => handleSquareTap(square)}
             >
               <div className="strip-square-header">
                 <span className="square-number">#{square.number}</span>
@@ -630,7 +764,9 @@ function BoardView({ shareMode = false }) {
                 </div>
               </div>
               <div className="strip-owner">
-                {square.owner || 'Available'}
+                {square.owner ||
+                  (pending ? (pending.mine ? '⏳ Yours — pending approval' : '⏳ Requested') :
+                    (claimable ? 'Tap to claim' : 'Available'))}
               </div>
             </div>
           )
@@ -692,15 +828,17 @@ function BoardView({ shareMode = false }) {
 
         const isHighlighted = mySquareNumbers.includes(square.number)
         const isWinning = winningSquares.includes(square.number)
+        const pending = pendingBySquare[square.number]
+        const claimable = claimingOpen && !square.owner && !pending
 
         rowCells.push(
           <div
             key={`square-${square.number}`}
-            className={`square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''} ${canEdit ? '' : 'no-edit'}`}
-            onClick={() => openSquareEditor(square)}
+            className={`square ${isHighlighted ? 'highlighted' : ''} ${isWinning ? 'winning' : ''} ${canEdit || claimable || pending?.mine ? '' : 'no-edit'} ${pending ? (pending.mine ? 'mine-pending' : 'requested') : ''}`}
+            onClick={() => handleSquareTap(square)}
           >
             <span className="square-number">{square.number}</span>
-            <span className="square-owner">{square.owner || '-'}</span>
+            <span className="square-owner">{square.owner || (pending ? '⏳' : (claimable ? '+' : '-'))}</span>
           </div>
         )
       }
@@ -725,11 +863,27 @@ function BoardView({ shareMode = false }) {
     <div>
       {shareMode && (
         <div className="viewer-banner">
-          👀 You're watching this board live (view-only).
-          {!user && (
-            <span> Playing in this game? <Link to="/register">Create a free account</Link> to track your squares and stats.</span>
+          {claimingOpen ? (
+            user ? (
+              viewer.membership === 'pending'
+                ? <>⏳ Your join request is with the commissioner — squares unlock once you're approved.</>
+                : <>🎯 <strong>Tap any open square to claim it.</strong>{viewer.claimMode === 'approval' ? ' The commissioner approves each request.' : " It's yours instantly."}</>
+            ) : (
+              <>🎯 Squares are open on this board! <Link to={`/login?next=${encodeURIComponent(location.pathname)}`}>Sign in</Link> or <Link to={`/register?next=${encodeURIComponent(location.pathname)}`}>create a free account</Link> to claim yours.</>
+            )
+          ) : (
+            <>
+              👀 You're watching this board live.
+              {!user && (
+                <span> Playing in this game? <Link to="/register">Create a free account</Link> to track your squares and stats.</span>
+              )}
+            </>
           )}
         </div>
+      )}
+
+      {requestNote && (
+        <div className="claim-note" role="status">{requestNote}</div>
       )}
 
       {!shareMode && (
@@ -750,6 +904,11 @@ function BoardView({ shareMode = false }) {
         {canEdit && (
           <button className="btn btn-secondary btn-small" onClick={openBoardImage}>
             🖼 Board Image
+          </button>
+        )}
+        {canEdit && (
+          <button className="btn btn-secondary btn-small" onClick={duplicateBoard} title="Same setup, blank board — for the next game">
+            ⧉ Duplicate
           </button>
         )}
       </div>
@@ -828,6 +987,73 @@ function BoardView({ shareMode = false }) {
         )}
 
         <div className="sidebar">
+          {/* Pending square requests (commissioner) */}
+          {canEdit && board.claimMode && board.claimMode !== 'admin' && (
+            <div className="card">
+              <h3>Square Requests</h3>
+              {(board.requests || []).filter(r => r.status === 'pending').length === 0 ? (
+                <p className="live-hint">
+                  No pending requests. Members tap squares on your share link and they show up here
+                  {board.claimMode === 'auto' ? ' — auto-accept is on, so most claims complete themselves.' : ' for one-tap approval.'}
+                </p>
+              ) : (
+                <div className="request-list">
+                  {(board.requests || []).filter(r => r.status === 'pending').map(request => (
+                    <div key={request.id} className="request-row">
+                      <span className="request-info">
+                        <strong>{request.userName}</strong> wants <strong>#{request.squareNumber}</strong>
+                        {request.viaWaitlist && <span className="pending-pill"> waitlist</span>}
+                      </span>
+                      <span className="member-actions">
+                        <button className="btn-record accept" onClick={() => decideRequest(request.id, 'accept')}>Accept</button>
+                        <button className="btn-record" onClick={() => decideRequest(request.id, 'deny')}>Deny</button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(board.waitlist || []).length > 0 && (
+                <p className="live-hint" style={{ marginTop: '10px' }}>
+                  Waitlist: {(board.waitlist || []).map(w => w.name).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Waitlist (members, when nothing's left to request) */}
+          {shareMode && user && viewer?.waitlistOpen && (
+            <div className="card">
+              <h3>Board Full</h3>
+              <p className="live-hint">
+                Every square is claimed or requested. Get in line — if one opens up, it's offered to
+                the front of the waitlist automatically.
+              </p>
+              <button className="btn btn-secondary" style={{ width: '100%' }} onClick={toggleWaitlist}>
+                {viewer.onWaitlist ? '✓ On the waitlist — tap to leave' : 'Join the waitlist'}
+              </button>
+            </div>
+          )}
+
+          {/* Pay the commissioner */}
+          {shareMode && user && viewer?.payment && !paymentHiddenPref(viewer.payment.leagueId) && (
+            <div className="card">
+              <h3>Pay the Commissioner</h3>
+              <PaymentPanel
+                payment={viewer.payment}
+                user={user}
+                onHidden={() => setPayHidden(true)}
+                compact
+              />
+            </div>
+          )}
+
+          {/* Game-day notifications */}
+          {shareMode && user && pushState === false && (
+            <button className="btn btn-secondary" onClick={turnOnPush}>
+              🔔 Notify me when my squares hit
+            </button>
+          )}
+
           {/* My Squares Tracker */}
           <div className="card">
             <h3>Track My Squares</h3>
@@ -1284,6 +1510,23 @@ function BoardView({ shareMode = false }) {
           </div>
         )
       })()}
+
+      {/* Payment info right after a square becomes theirs */}
+      {showPayModal && viewer?.payment && (
+        <div className="modal-overlay" onClick={() => setShowPayModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>🎉 You're in — here's how to pay</h3>
+            <PaymentPanel
+              payment={viewer.payment}
+              user={user}
+              onHidden={() => { setPayHidden(true); setShowPayModal(false) }}
+            />
+            <div className="modal-actions">
+              <button className="btn btn-primary" onClick={() => setShowPayModal(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Shareable board image */}
       {shareImageUrl && (

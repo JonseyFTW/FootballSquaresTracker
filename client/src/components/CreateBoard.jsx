@@ -16,6 +16,7 @@ function CreateBoard() {
   const [xTeamName, setXTeamName] = useState('')
   const [yTeamName, setYTeamName] = useState('')
   const [numbersMode, setNumbersMode] = useState('later') // 'later' | 'manual'
+  const [claimMode, setClaimMode] = useState(leagueId ? 'approval' : 'admin')
   const [xAxis, setXAxis] = useState(Array(10).fill(''))
   const [yAxis, setYAxis] = useState(Array(10).fill(''))
   const [prizes, setPrizes] = useState({ q1: '', half: '', q3: '', final: '' })
@@ -196,6 +197,8 @@ function CreateBoard() {
       if (selectedGame) {
         boardPayload.liveGame = { eventId: selectedGame.id, xTeamSide }
       }
+
+      boardPayload.claimMode = claimMode
 
       if (importedSquares && importedSquares.length > 0) {
         boardPayload.squares = importedSquares
@@ -480,6 +483,24 @@ function CreateBoard() {
             )}
           </div>
         )}
+
+        <div className="axis-input-group">
+          <h4 style={{ margin: 0 }}>How People Get Squares</h4>
+          <div className="numbers-mode">
+            <label className={claimMode === 'approval' ? 'selected' : ''}>
+              <input type="radio" name="claim-mode" checked={claimMode === 'approval'} onChange={() => setClaimMode('approval')} />
+              <span><strong>They request, you approve</strong> — anyone with the link (league members) taps a square, you accept or deny with one tap.</span>
+            </label>
+            <label className={claimMode === 'auto' ? 'selected' : ''}>
+              <input type="radio" name="claim-mode" checked={claimMode === 'auto'} onChange={() => setClaimMode('auto')} />
+              <span><strong>Auto-accept</strong> — first tap takes the square instantly, no approval step.</span>
+            </label>
+            <label className={claimMode === 'admin' ? 'selected' : ''}>
+              <input type="radio" name="claim-mode" checked={claimMode === 'admin'} onChange={() => setClaimMode('admin')} />
+              <span><strong>You assign everything</strong> — squares only change when you edit them.</span>
+            </label>
+          </div>
+        </div>
 
         <div className="axis-input-group">
           <h4>Money (Optional)</h4>
