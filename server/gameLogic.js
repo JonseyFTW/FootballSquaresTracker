@@ -131,6 +131,33 @@ function calculateWinningScores(board, userSquares) {
   return winningCombinations;
 }
 
+const PHASE_ORDER = ['pre-game', '1st Quarter', '2nd Quarter', 'Halftime', '3rd Quarter', '4th Quarter', 'Overtime', 'Final'];
+
+// When a commissioner advances the game phase by hand, the score they
+// submit alongside it is the score at the moment of the change — i.e. the
+// end of the most recently completed period. This maps a phase transition
+// to that period ('q1' | 'half' | 'q3' | 'final'), or null when no period
+// boundary was crossed. Skipped boundaries (jumping 1st Quarter straight
+// to Final) stay unrecorded because their scores were never entered.
+function latestCompletedPeriod(prevPhase, newPhase) {
+  const prev = PHASE_ORDER.indexOf(prevPhase);
+  const next = PHASE_ORDER.indexOf(newPhase);
+  if (prev === -1 || next === -1 || next <= prev) return null;
+
+  const boundaries = [
+    ['q1', PHASE_ORDER.indexOf('2nd Quarter')],
+    ['half', PHASE_ORDER.indexOf('Halftime')],
+    ['q3', PHASE_ORDER.indexOf('4th Quarter')],
+    ['final', PHASE_ORDER.indexOf('Final')]
+  ];
+
+  let latest = null;
+  for (const [period, at] of boundaries) {
+    if (prev < at && next >= at) latest = period;
+  }
+  return latest;
+}
+
 // True when the axis is a permutation of the digits 0-9.
 function isValidAxisPermutation(axis) {
   if (!Array.isArray(axis) || axis.length !== 10) return false;
@@ -146,5 +173,6 @@ module.exports = {
   findWinningSquares,
   checkCurrentWinners,
   calculateWinningScores,
+  latestCompletedPeriod,
   isValidAxisPermutation
 };

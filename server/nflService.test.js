@@ -4,7 +4,8 @@ const {
   espnStatusToGamePhase,
   simplifyCompetition,
   simplifyScoreboard,
-  applyGameToBoard
+  applyGameToBoard,
+  completedPeriodScores
 } = require('./nflService');
 
 function status(state, name, period, clock) {
@@ -101,4 +102,70 @@ test('applyGameToBoard maps home/away onto x/y by xTeamSide', () => {
   applyGameToBoard(board2, game);
   assert.strictEqual(board2.currentScore.xTeam, 13);
   assert.strictEqual(board2.currentScore.yTeam, 29);
+});
+
+// ----- completedPeriodScores -----
+
+function liveGame({ state, period, gamePhase, homeLines, awayLines, homeScore, awayScore }) {
+  return {
+    state,
+    period,
+    gamePhase,
+    home: { name: 'Denver Broncos', score: homeScore, linescores: homeLines },
+    away: { name: 'Minnesota Vikings', score: awayScore, linescores: awayLines }
+  };
+}
+
+test('completedPeriodScores: mid-Q2 yields exact Q1 score despite Q2 points', () => {
+  const game = liveGame({
+    state: 'in', period: 2, gamePhase: '2nd Quarter',
+    homeLines: [7, 7], awayLines: [3, 0], homeScore: 14, awayScore: 3
+  });
+  assert.deepStrictEqual(completedPeriodScores(game), { q1: { home: 7, away: 3 } });
+});
+
+test('completedPeriodScores: halftime adds the half score', () => {
+  const game = liveGame({
+    state: 'in', period: 2, gamePhase: 'Halftime',
+    homeLines: [7, 6], awayLines: [3, 0], homeScore: 13, awayScore: 3
+  });
+  assert.deepStrictEqual(completedPeriodScores(game), {
+    q1: { home: 7, away: 3 },
+    half: { home: 13, away: 3 }
+  });
+});
+
+test('completedPeriodScores: final uses live totals (overtime included)', () => {
+  const game = liveGame({
+    state: 'post', period: 5, gamePhase: 'Final',
+    homeLines: [7, 6, 0, 7, 6], awayLines: [3, 0, 7, 10, 0], homeScore: 26, awayScore: 20
+  });
+  assert.deepStrictEqual(completedPeriodScores(game), {
+    q1: { home: 7, away: 3 },
+    half: { home: 13, away: 3 },
+    q3: { home: 13, away: 10 },
+    final: { home: 26, away: 20 }
+  });
+});
+
+test('completedPeriodScores: missing linescores only yields final when post', () => {
+  const inProgress = liveGame({
+    state: 'in', period: 3, gamePhase: '3rd Quarter',
+    homeLines: [], awayLines: [], homeScore: 13, awayScore: 3
+  });
+  assert.deepStrictEqual(completedPeriodScores(inProgress), {});
+
+  const done = liveGame({
+    state: 'post', period: 4, gamePhase: 'Final',
+    homeLines: [], awayLines: [], homeScore: 26, awayScore: 20
+  });
+  assert.deepStrictEqual(completedPeriodScores(done), { final: { home: 26, away: 20 } });
+});
+
+test('completedPeriodScores: nothing during Q1', () => {
+  const game = liveGame({
+    state: 'in', period: 1, gamePhase: '1st Quarter',
+    homeLines: [7], awayLines: [0], homeScore: 7, awayScore: 0
+  });
+  assert.deepStrictEqual(completedPeriodScores(game), {});
 });
