@@ -105,7 +105,16 @@ plus this step are configured:
    of 100 emails/day before upgrading), `EMAIL_POSTAL_ADDRESS` (shown in the
    footer; CAN-SPAM asks marketing email to carry a postal address)
 
-### 7. Optional: AI square-sheet import
+### 7. Admin access (Pricing Lab) — `ADMIN_EMAILS`
+
+The revenue calculator at `/admin/pricing` is only visible to admin
+accounts. Set `ADMIN_EMAILS` to the SquareSZN **account email(s)** that
+should have access (comma-separated), e.g. your own login email →
+redeploy. Unset means nobody is an admin; everyone else who tries the URL
+is bounced to their boards. After signing in, admins also get a "Pricing
+Lab" link in the site footer.
+
+### 8. Optional: AI square-sheet import
 
 The "import from image" feature needs one AI provider key; without one, users
 can still paste their own key in the UI. Cheapest hands-off option:
@@ -113,7 +122,7 @@ can still paste their own key in the UI. Cheapest hands-off option:
 `google/gemini-2.5-flash-lite`; override with `OPENROUTER_MODEL` or per-import
 in the UI). Alternatives: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CLAUDE_API_KEY`.
 
-### 8. Optional: receiving email at @squareszn.com
+### 9. Optional: receiving email at @squareszn.com
 
 Resend only **sends**. To receive (e.g. `hello@squareszn.com` → your Gmail),
 use Cloudflare Email Routing — free, and the domain is already on Cloudflare:
@@ -143,4 +152,5 @@ After any change:
 | `RESEND_API_KEY` / `EMAIL_FROM` | ⚠ confirm | Step 5 |
 | `CRON_SECRET` | ❌ not set | Step 6 — reminder emails stay off until set |
 | `EMAIL_DAILY_CAP` / `EMAIL_POSTAL_ADDRESS` | optional | Step 6 |
-| `OPENROUTER_API_KEY` (or Gemini/OpenAI/Claude key) | optional | Step 7 |
+| `ADMIN_EMAILS` | ❌ not set | Step 7 — Pricing Lab stays hidden until set |
+| `OPENROUTER_API_KEY` (or Gemini/OpenAI/Claude key) | optional | Step 8 |

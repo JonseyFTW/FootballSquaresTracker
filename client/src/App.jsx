@@ -10,6 +10,7 @@ import Leagues from './components/Leagues'
 import LeagueView from './components/LeagueView'
 import LeagueShare from './components/LeagueShare'
 import Analytics from './components/Analytics'
+import PricingLab from './components/PricingLab'
 import InstallBanner from './components/InstallBanner'
 import { useAuth } from './AuthContext'
 
@@ -21,6 +22,24 @@ function RequireAuth({ children }) {
   }
   if (!user) {
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />
+  }
+  return children
+}
+
+// Admin pages: sign-in required, then the server-computed isAdmin flag
+// (ADMIN_EMAILS allowlist) decides. Everyone else lands on their boards.
+function RequireAdmin({ children }) {
+  return (
+    <RequireAuth>
+      <AdminGate>{children}</AdminGate>
+    </RequireAuth>
+  )
+}
+
+function AdminGate({ children }) {
+  const { user } = useAuth()
+  if (!user?.isAdmin) {
+    return <Navigate to="/boards" replace />
   }
   return children
 }
@@ -94,6 +113,7 @@ function App() {
           <Route path="/league/share/:token" element={<LeagueShare />} />
           <Route path="/league/:id" element={<RequireAuth><LeagueView /></RequireAuth>} />
           <Route path="/me" element={<RequireAuth><Analytics /></RequireAuth>} />
+          <Route path="/admin/pricing" element={<RequireAdmin><PricingLab /></RequireAdmin>} />
         </Routes>
       </main>
 
@@ -103,6 +123,7 @@ function App() {
           <Link to="/create">Create a board</Link>
           <Link to="/boards">Boards</Link>
           {user ? <Link to="/leagues">Leagues</Link> : <Link to="/register">Create account</Link>}
+          {user?.isAdmin && <Link to="/admin/pricing">Pricing Lab</Link>}
         </nav>
         <span className="footer-note">Live scores courtesy of ESPN's public scoreboard</span>
       </footer>
