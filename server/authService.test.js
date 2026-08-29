@@ -10,6 +10,7 @@ const {
   passwordVersion,
   normalizeEmail,
   isValidEmail,
+  isAdminEmail,
   publicUser
 } = require('./authService');
 
@@ -93,6 +94,27 @@ test('email helpers', () => {
   assert.ok(!isValidEmail('not-an-email'));
   assert.ok(!isValidEmail('a@b'));
   assert.ok(!isValidEmail(''));
+});
+
+test('isAdminEmail matches the ADMIN_EMAILS allowlist', () => {
+  const original = process.env.ADMIN_EMAILS;
+  try {
+    delete process.env.ADMIN_EMAILS;
+    assert.ok(!isAdminEmail('chad@example.com'), 'unset list means no admins');
+
+    process.env.ADMIN_EMAILS = ' Chad@Example.com , other@site.io ';
+    assert.ok(isAdminEmail('chad@example.com'));
+    assert.ok(isAdminEmail('  CHAD@example.COM '), 'comparison is normalized');
+    assert.ok(isAdminEmail('other@site.io'));
+    assert.ok(!isAdminEmail('viewer@example.com'));
+    assert.ok(!isAdminEmail(''));
+
+    process.env.ADMIN_EMAILS = '   ';
+    assert.ok(!isAdminEmail('chad@example.com'), 'blank list means no admins');
+  } finally {
+    if (original === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = original;
+  }
 });
 
 test('publicUser strips the password hash', () => {

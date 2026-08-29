@@ -79,6 +79,12 @@ function canEditBoard(board, user) {
   return !!user && user.id === board.ownerId;
 }
 
+// What the client is allowed to know about an account. isAdmin (from the
+// ADMIN_EMAILS allowlist) gates owner-only pages like the Pricing Lab.
+function userPayload(user) {
+  return { ...auth.publicUser(user), isAdmin: auth.isAdminEmail(user.email) };
+}
+
 // Public origin for links in emails (APP_URL wins so links never point
 // at a preview deployment's hostname).
 function getOrigin(req) {
@@ -177,7 +183,7 @@ app.post('/api/auth/register', async (req, res) => {
     };
     await storage.saveUser(user);
 
-    res.status(201).json({ token: auth.signToken(user.id), user: auth.publicUser(user) });
+    res.status(201).json({ token: auth.signToken(user.id), user: userPayload(user) });
   } catch (error) {
     console.error('Error registering:', error);
     res.status(500).json({ error: 'Failed to create account' });
@@ -194,7 +200,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    res.json({ token: auth.signToken(user.id), user: auth.publicUser(user) });
+    res.json({ token: auth.signToken(user.id), user: userPayload(user) });
   } catch (error) {
     console.error('Error logging in:', error);
     res.status(500).json({ error: 'Failed to sign in' });
@@ -202,7 +208,7 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 app.get('/api/me', requireAuth, (req, res) => {
-  res.json({ user: auth.publicUser(req.user) });
+  res.json({ user: userPayload(req.user) });
 });
 
 // Public auth configuration for the client (which providers to offer)
@@ -247,7 +253,7 @@ app.post('/api/auth/google', async (req, res) => {
       await storage.saveUser(user);
     }
 
-    res.json({ token: auth.signToken(user.id), user: auth.publicUser(user) });
+    res.json({ token: auth.signToken(user.id), user: userPayload(user) });
   } catch (error) {
     console.error('Error with Google sign-in:', error);
     res.status(500).json({ error: 'Google sign-in failed' });
@@ -324,7 +330,7 @@ app.post('/api/auth/reset', async (req, res) => {
     user.passwordHash = auth.hashPassword(password);
     await storage.saveUser(user);
 
-    res.json({ token: auth.signToken(user.id), user: auth.publicUser(user) });
+    res.json({ token: auth.signToken(user.id), user: userPayload(user) });
   } catch (error) {
     console.error('Error resetting password:', error);
     res.status(500).json({ error: 'Failed to reset password' });

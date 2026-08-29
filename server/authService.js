@@ -168,6 +168,16 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Admin allowlist: ADMIN_EMAILS is a comma-separated list of account
+// emails. Unset means nobody is an admin.
+function isAdminEmail(email) {
+  const list = String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+  return list.length > 0 && list.includes(normalizeEmail(email));
+}
+
 // Strip fields that must never leave the server
 function publicUser(user) {
   if (!user) return null;
@@ -188,5 +198,6 @@ module.exports = {
   passwordVersion,
   normalizeEmail,
   isValidEmail,
+  isAdminEmail,
   publicUser
 };
