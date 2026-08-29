@@ -63,7 +63,7 @@ function CreateBoard() {
     setSelectedGameId(game.id)
     applySides(game, xTeamSide)
     if (!name || name.endsWith('Squares')) {
-      setName(`${game.shortName} Squares`)
+      setName(`${game.away.name} vs ${game.home.name} Squares`)
     }
   }
 
