@@ -12,8 +12,11 @@ const { sendPasswordResetEmail } = require('./emailService');
 const { runDailyCampaigns } = require('./emailCampaigns');
 const { verifyGoogleIdToken } = require('./googleAuth');
 const { computeAnalytics } = require('./analyticsService');
+const claims = require('./claimsService');
+const notify = require('./notify');
 const {
   shuffle,
+  strip10BlocksFromPermutations,
   generateStrip10Assignments,
   boardHasAxes,
   findWinningSquares,
@@ -133,7 +136,10 @@ function boardSummary(board) {
     squarePrice: board.squarePrice || 0,
     liveGame: board.liveGame ? { gameName: board.liveGame.gameName, lastSync: board.liveGame.lastSync } : null,
     filledSquares: (board.squares || []).filter(s => s.owner).length,
-    totalSquares: (board.squares || []).length
+    totalSquares: (board.squares || []).length,
+    claimMode: claims.claimMode(board),
+    openSquares: claims.requestableSquares(board).length,
+    pendingRequests: claims.pendingRequests(board).length
   };
 }
 
@@ -480,6 +486,9 @@ app.post('/api/leagues', requireAuth, async (req, res) => {
       ownerId: req.user.id,
       ownerName: req.user.name,
       members: [],
+      joinedMembers: [],
+      joinMode: claims.JOIN_MODES.includes(req.body.joinMode) ? req.body.joinMode : 'approval',
+      paymentMethods: [],
       shareToken: uuidv4(),
       createdAt: new Date().toISOString()
     };
@@ -493,8 +502,30 @@ app.post('/api/leagues', requireAuth, async (req, res) => {
 
 app.get('/api/leagues', requireAuth, async (req, res) => {
   try {
-    const leagues = await storage.getLeaguesByOwnerId(req.user.id);
-    res.json(leagues);
+    const all = await storage.getAllLeagues();
+    const owned = all
+      .filter(l => l.ownerId === req.user.id)
+      .map(l => ({
+        ...l,
+        role: 'owner',
+        pendingJoinCount: (l.joinedMembers || []).filter(m => m.status === 'pending').length
+      }));
+    // Leagues this user belongs to (or is waiting on) — enough to list and
+    // link to the member view, nothing that's the owner's business.
+    const joined = all
+      .filter(l => l.ownerId !== req.user.id)
+      .map(l => ({ league: l, status: claims.memberStatus(l, req.user.id) }))
+      .filter(({ status }) => status === 'active' || status === 'pending')
+      .map(({ league, status }) => ({
+        id: league.id,
+        name: league.name,
+        description: league.description,
+        ownerName: league.ownerName,
+        shareToken: league.shareToken,
+        role: 'member',
+        membership: status
+      }));
+    res.json([...owned, ...joined]);
   } catch (error) {
     console.error('Error listing leagues:', error);
     res.status(500).json({ error: 'Failed to list leagues' });
@@ -538,6 +569,25 @@ app.put('/api/leagues/:id', requireAuth, async (req, res) => {
     }
     if (req.body.description !== undefined) {
       league.description = sanitizeName(req.body.description, 300);
+    }
+    if (req.body.joinMode !== undefined) {
+      if (!claims.JOIN_MODES.includes(req.body.joinMode)) {
+        return res.status(400).json({ error: 'joinMode must be "approval" or "auto"' });
+      }
+      league.joinMode = req.body.joinMode;
+      // Flipping to auto-accept lets everyone already waiting straight in
+      if (league.joinMode === 'auto') {
+        for (const member of league.joinedMembers || []) {
+          if (member.status === 'pending') member.status = 'active';
+        }
+      }
+    }
+    if (req.body.paymentMethods !== undefined) {
+      const methods = claims.sanitizePaymentMethods(req.body.paymentMethods);
+      if (!methods) {
+        return res.status(400).json({ error: 'Payment methods need a type (venmo, paypal, zelle, cashapp, other) and a handle' });
+      }
+      league.paymentMethods = methods;
     }
     await storage.saveLeague(league);
     res.json(league);
@@ -604,21 +654,133 @@ app.delete('/api/leagues/:id/members/:memberId', requireAuth, async (req, res) =
   }
 });
 
-// Public league page (read-only, by share token)
+// Public league page (by share token). Members see it as their home for
+// the group's boards; banned users are turned away.
 app.get('/api/league-share/:token', async (req, res) => {
   try {
     const league = await storage.getLeagueByShareToken(req.params.token);
     if (!league) {
       return res.status(404).json({ error: 'League not found' });
     }
+    const membership = claims.memberStatus(league, req.user?.id);
+    if (membership === 'banned') {
+      return res.status(403).json({ error: "You've been removed from this league." });
+    }
     const boards = await storage.getBoardsByLeagueId(league.id);
     res.json({
-      league: { name: league.name, description: league.description, ownerName: league.ownerName },
+      league: {
+        name: league.name,
+        description: league.description,
+        ownerName: league.ownerName,
+        joinMode: claims.joinMode(league)
+      },
+      viewer: {
+        membership,
+        isOwner: !!req.user && league.ownerId === req.user.id
+      },
       boards: boards.map(boardSummary)
     });
   } catch (error) {
     console.error('Error loading shared league:', error);
     res.status(500).json({ error: 'Failed to load league' });
+  }
+});
+
+// Ask to join a league (or walk straight in when it auto-accepts)
+app.post('/api/league-share/:token/join', requireAuth, async (req, res) => {
+  try {
+    const league = await storage.getLeagueByShareToken(req.params.token);
+    if (!league) {
+      return res.status(404).json({ error: 'League not found' });
+    }
+    if (league.ownerId === req.user.id) {
+      return res.status(400).json({ error: 'You run this league' });
+    }
+
+    const existing = claims.findMember(league, req.user.id);
+    if (existing?.status === 'banned') {
+      return res.status(403).json({ error: "You've been removed from this league." });
+    }
+    if (existing) {
+      return res.json({ membership: existing.status });
+    }
+
+    const status = claims.joinMode(league) === 'auto' ? 'active' : 'pending';
+    league.joinedMembers = league.joinedMembers || [];
+    league.joinedMembers.push({
+      userId: req.user.id,
+      name: req.user.name,
+      joinedAt: new Date().toISOString(),
+      status
+    });
+
+    if (status === 'pending') {
+      const pendingCount = league.joinedMembers.filter(m => m.status === 'pending').length;
+      await notify.notifyOwnerOfPending({
+        ownerId: league.ownerId,
+        subjectEntity: league,
+        kind: 'join',
+        count: pendingCount,
+        url: `/league/${league.id}`,
+        origin: getOrigin(req)
+      });
+    }
+
+    await storage.saveLeague(league);
+    res.json({ membership: status });
+  } catch (error) {
+    console.error('Error joining league:', error);
+    res.status(500).json({ error: 'Failed to join league' });
+  }
+});
+
+// Owner decisions on joined members: approve, deny, ban, unban
+app.put('/api/leagues/:id/joined/:userId', requireAuth, async (req, res) => {
+  try {
+    const league = await loadOwnedLeague(req, res);
+    if (!league) return;
+
+    const { action } = req.body;
+    const member = claims.findMember(league, req.params.userId);
+    if (!member) {
+      return res.status(404).json({ error: 'No such member' });
+    }
+
+    if (action === 'approve') {
+      if (member.status === 'pending') member.status = 'active';
+    } else if (action === 'deny') {
+      // Denied joins simply disappear — they can ask again
+      league.joinedMembers = league.joinedMembers.filter(m => m.userId !== member.userId);
+    } else if (action === 'unban') {
+      if (member.status === 'banned') member.status = 'active';
+    } else if (action === 'ban') {
+      member.status = 'banned';
+      // A ban sweeps their pending requests and waitlist spots off every
+      // board in the league
+      const boards = await storage.getBoardsByLeagueId(league.id);
+      for (const board of boards) {
+        let changed = false;
+        for (const request of claims.pendingRequests(board)) {
+          if (request.userId === member.userId) {
+            request.status = 'denied';
+            changed = true;
+          }
+        }
+        const beforeCount = (board.waitlist || []).length;
+        board.waitlist = (board.waitlist || []).filter(w => w.userId !== member.userId);
+        if (changed || board.waitlist.length !== beforeCount) {
+          await storage.saveBoard(board);
+        }
+      }
+    } else {
+      return res.status(400).json({ error: 'action must be approve, deny, ban, or unban' });
+    }
+
+    await storage.saveLeague(league);
+    res.json(league);
+  } catch (error) {
+    console.error('Error updating member:', error);
+    res.status(500).json({ error: 'Failed to update member' });
   }
 });
 
@@ -718,6 +880,12 @@ app.post('/api/boards', requireAuth, async (req, res) => {
           yDigits: sanitizeDigits(sq.yDigits) || [],
           owner: sanitizeOwner(sq.owner)
         }));
+      } else if (req.body.drawLater) {
+        // Claim-first flow: spots exist with no digits until the group
+        // fills the board and the owner runs (or enters) the draw.
+        for (let i = 0; i < 10; i++) {
+          squares.push({ number: i + 1, xDigits: [], yDigits: [], owner: '' });
+        }
       } else {
         const stripAssignments = generateStrip10Assignments();
         for (let i = 0; i < 10; i++) {
@@ -766,6 +934,13 @@ app.post('/api/boards', requireAuth, async (req, res) => {
       gamePhase: 'pre-game',
       periodResults: {},
       payments: {},
+      requests: [],
+      waitlist: [],
+      // League boards default to member requests with owner approval; the
+      // owner can pick instant auto-accept or classic admin-only instead.
+      claimMode: claims.CLAIM_MODES.includes(req.body.claimMode)
+        ? req.body.claimMode
+        : (leagueId ? 'approval' : 'admin'),
       squarePrice: Math.max(0, Number(squarePrice) || 0),
       shareToken: uuidv4(),
       createdAt: new Date().toISOString()
@@ -827,21 +1002,33 @@ app.put('/api/boards/:id/draw-axes', async (req, res) => {
     const board = await loadEditableBoard(req, res);
     if (!board) return;
 
-    if (board.type === 'strip-10') {
-      return res.status(400).json({ error: 'Strip boards have digits on squares, not axes' });
-    }
     if (board.gamePhase !== 'pre-game') {
       return res.status(400).json({ error: 'Numbers are locked once the game has started' });
     }
 
     const { runs, xAxis, yAxis, mode } = req.body;
 
+    // Grids take the permutations as their axes; strips derive each
+    // spot's digit groups from the same two rows in reading order, so
+    // the drawn rows fully determine the board either way.
+    const applyPermutations = (xPerm, yPerm) => {
+      if (board.type === 'strip-10') {
+        const blocks = strip10BlocksFromPermutations(xPerm, yPerm);
+        board.squares.forEach((square, i) => {
+          square.xDigits = blocks[i].xDigits;
+          square.yDigits = blocks[i].yDigits;
+        });
+      } else {
+        board.xAxis = xPerm;
+        board.yAxis = yPerm;
+      }
+    };
+
     if (mode === 'manual') {
       if (!isValidAxisPermutation(xAxis) || !isValidAxisPermutation(yAxis)) {
         return res.status(400).json({ error: 'Each axis must contain the digits 0-9 exactly once' });
       }
-      board.xAxis = xAxis.map(Number);
-      board.yAxis = yAxis.map(Number);
+      applyPermutations(xAxis.map(Number), yAxis.map(Number));
       board.drawLog = { mode: 'manual', runs: 0, drawnAt: new Date().toISOString() };
     } else {
       const runCount = parseInt(runs, 10);
@@ -854,8 +1041,7 @@ app.put('/api/boards/:id/draw-axes', async (req, res) => {
         history.push({ xAxis: shuffle(digits), yAxis: shuffle(digits) });
       }
       const final = history[history.length - 1];
-      board.xAxis = final.xAxis;
-      board.yAxis = final.yAxis;
+      applyPermutations(final.xAxis, final.yAxis);
       board.drawLog = {
         mode: 'randomized',
         runs: runCount,
@@ -955,7 +1141,40 @@ app.put('/api/boards/:id/squares/:squareNum', async (req, res) => {
 
     const square = board.squares[squareIndex];
     if (owner !== undefined) {
-      square.owner = sanitizeOwner(owner);
+      const newOwner = sanitizeOwner(owner);
+      const prevLinked = square.ownerUserId || null;
+      square.owner = newOwner;
+
+      // Keep account links honest on manual edits: a name matching an
+      // active league member links (and auto-tracks) that account, whoever
+      // lost the square stops tracking it, and pending requests for a
+      // square the admin just filled are cleared.
+      let linkedUserId = null;
+      if (newOwner && board.leagueId) {
+        const league = await storage.getLeagueById(board.leagueId);
+        const member = (league?.joinedMembers || []).find(m =>
+          m.status === 'active' && m.name.toLowerCase() === newOwner.toLowerCase());
+        if (member) linkedUserId = member.userId;
+      }
+      if (prevLinked && prevLinked !== linkedUserId) {
+        await untrackSquareForUser(prevLinked, board.id, square.number);
+      }
+      if (linkedUserId) {
+        square.ownerUserId = linkedUserId;
+        if (linkedUserId !== prevLinked) {
+          await trackSquareForUser(linkedUserId, board.id, square.number);
+        }
+      } else {
+        delete square.ownerUserId;
+      }
+
+      if (newOwner) {
+        for (const request of claims.pendingRequests(board)) {
+          if (request.squareNumber === square.number) request.status = 'denied';
+        }
+      } else {
+        await backfillFromWaitlist(board, getOrigin(req));
+      }
     }
 
     if (board.type === 'strip-10') {
@@ -1235,17 +1454,466 @@ async function loadSharedBoard(req, res) {
     res.status(404).json({ error: 'Board not found — the share link may be wrong or revoked' });
     return null;
   }
+  // Banned league members lose access while signed in (the link itself
+  // stays public — that's what lets it spread through the group)
+  if (board.leagueId && req.user) {
+    const league = await storage.getLeagueById(board.leagueId);
+    if (league && claims.memberStatus(league, req.user.id) === 'banned') {
+      res.status(403).json({ error: "You've been removed from this league." });
+      return null;
+    }
+  }
   return board;
+}
+
+// ----- claiming: tracking, assignment, waitlist backfill -----
+
+async function trackSquareForUser(userId, boardId, squareNumber) {
+  const user = await storage.getUserById(userId);
+  if (!user) return null;
+  user.trackedGames = user.trackedGames || [];
+  let entry = user.trackedGames.find(t => t.boardId === boardId);
+  if (!entry) {
+    entry = { boardId, squares: [], updatedAt: new Date().toISOString() };
+    user.trackedGames.push(entry);
+  }
+  if (!entry.squares.includes(squareNumber)) entry.squares.push(squareNumber);
+  entry.updatedAt = new Date().toISOString();
+  await storage.saveUser(user);
+  return user;
+}
+
+async function untrackSquareForUser(userId, boardId, squareNumber) {
+  const user = await storage.getUserById(userId);
+  if (!user) return;
+  const entry = (user.trackedGames || []).find(t => t.boardId === boardId);
+  if (!entry) return;
+  entry.squares = entry.squares.filter(n => n !== squareNumber);
+  if (entry.squares.length === 0) {
+    user.trackedGames = user.trackedGames.filter(t => t !== entry);
+  }
+  await storage.saveUser(user);
+}
+
+// Put a user's name on a square with the account linked and the square
+// auto-tracked for their stats. Any other pending requests for the square
+// are denied — it's taken.
+async function assignSquareToUser(board, square, user) {
+  square.owner = user.name;
+  square.ownerUserId = user.id;
+  for (const request of claims.pendingRequests(board)) {
+    if (request.squareNumber === square.number) request.status = 'denied';
+  }
+  await trackSquareForUser(user.id, board.id, square.number);
+}
+
+// A square came free on a board people are waiting on: hand it to the
+// first person in line. Auto boards assign it outright; approval boards
+// file a pending request for the commissioner to confirm.
+async function backfillFromWaitlist(board, origin) {
+  if (board.gamePhase !== 'pre-game' || !(board.waitlist || []).length) return;
+  const openSquares = claims.requestableSquares(board);
+  if (openSquares.length === 0) return;
+
+  const league = board.leagueId ? await storage.getLeagueById(board.leagueId) : null;
+  while (board.waitlist.length > 0 && claims.requestableSquares(board).length > 0) {
+    const next = board.waitlist.shift();
+    const user = await storage.getUserById(next.userId);
+    if (!user) continue;
+    if (league && claims.memberStatus(league, user.id) !== 'active') continue;
+
+    const squareNumber = claims.requestableSquares(board)[0];
+    const square = claims.squareByNumber(board, squareNumber);
+
+    if (claims.claimMode(board) === 'auto') {
+      board.requests = board.requests || [];
+      board.requests.push({
+        id: uuidv4(), squareNumber, userId: user.id, userName: user.name,
+        requestedAt: new Date().toISOString(), status: 'accepted', viaWaitlist: true
+      });
+      await assignSquareToUser(board, square, user);
+      await notify.notifySquareAssigned({
+        user, board, squareNumbers: [squareNumber],
+        amountOwed: claims.amountOwed(board, user.id),
+        paymentMethods: league?.paymentMethods || [],
+        origin, reason: 'waitlist'
+      });
+    } else {
+      board.requests = board.requests || [];
+      board.requests.push({
+        id: uuidv4(), squareNumber, userId: user.id, userName: user.name,
+        requestedAt: new Date().toISOString(), status: 'pending', viaWaitlist: true
+      });
+      await notify.notifyOwnerOfPending({
+        ownerId: board.ownerId,
+        subjectEntity: board,
+        kind: 'square',
+        count: claims.pendingRequests(board).length,
+        url: `/board/${board.id}`,
+        origin
+      });
+    }
+    break; // one square per free-up keeps the line fair
+  }
+}
+
+// What a share-link viewer gets: the board without other people's request
+// identities, plus everything their own claiming UI needs.
+async function sharedBoardPayload(board, reqUser) {
+  const league = board.leagueId ? await storage.getLeagueById(board.leagueId) : null;
+  const userId = reqUser?.id || null;
+  const mySquares = claims.ownedSquareNumbers(board, userId);
+  const { requests, ...rest } = board;
+  return {
+    ...rest,
+    canEdit: false,
+    viewer: {
+      claimMode: claims.claimMode(board),
+      membership: league ? claims.memberStatus(league, userId) : null,
+      leagueJoinMode: league ? claims.joinMode(league) : null,
+      requests: claims.publicRequestView(board, userId),
+      waitlistOpen: claims.waitlistOpen(board),
+      onWaitlist: !!userId && (board.waitlist || []).some(w => w.userId === userId),
+      mySquares,
+      payment: mySquares.length > 0 && league && (league.paymentMethods || []).length > 0
+        ? {
+            leagueId: league.id,
+            leagueName: league.name,
+            methods: league.paymentMethods,
+            amountOwed: claims.amountOwed(board, userId)
+          }
+        : null
+    }
+  };
 }
 
 app.get('/api/share/:token', async (req, res) => {
   try {
     const board = await loadSharedBoard(req, res);
     if (!board) return;
-    res.json({ ...board, canEdit: false });
+    res.json(await sharedBoardPayload(board, req.user));
   } catch (error) {
     console.error('Error loading shared board:', error);
     res.status(500).json({ error: 'Failed to load board' });
+  }
+});
+
+// A signed-in viewer asks for a square. Auto boards hand it over on the
+// spot; approval boards hold it pending the commissioner's tap.
+app.post('/api/share/:token/requests', requireAuth, async (req, res) => {
+  try {
+    const board = await loadSharedBoard(req, res);
+    if (!board) return;
+
+    const squareNumber = parseInt(req.body.squareNumber, 10);
+    const blocker = claims.requestBlocker(board, squareNumber);
+    if (blocker) {
+      return res.status(blocker.status).json({ error: blocker.error });
+    }
+
+    // League boards need an active membership — but nobody should have to
+    // hunt for a Join button first: requesting joins them (instantly on
+    // auto-accept leagues, as a pending join otherwise).
+    let league = null;
+    if (board.leagueId) {
+      league = await storage.getLeagueById(board.leagueId);
+      if (league) {
+        const membership = claims.memberStatus(league, req.user.id);
+        if (membership === 'banned') {
+          return res.status(403).json({ error: "You've been removed from this league." });
+        }
+        if (membership !== 'active' && league.ownerId !== req.user.id) {
+          if (claims.joinMode(league) === 'auto') {
+            league.joinedMembers = league.joinedMembers || [];
+            const existing = claims.findMember(league, req.user.id);
+            if (existing) existing.status = 'active';
+            else league.joinedMembers.push({ userId: req.user.id, name: req.user.name, joinedAt: new Date().toISOString(), status: 'active' });
+            await storage.saveLeague(league);
+          } else {
+            if (!claims.findMember(league, req.user.id)) {
+              league.joinedMembers = league.joinedMembers || [];
+              league.joinedMembers.push({ userId: req.user.id, name: req.user.name, joinedAt: new Date().toISOString(), status: 'pending' });
+              await notify.notifyOwnerOfPending({
+                ownerId: league.ownerId,
+                subjectEntity: league,
+                kind: 'join',
+                count: league.joinedMembers.filter(m => m.status === 'pending').length,
+                url: `/league/${league.id}`,
+                origin: getOrigin(req)
+              });
+              await storage.saveLeague(league);
+            }
+            return res.status(403).json({
+              error: 'Join request sent! You can grab squares as soon as the commissioner approves you.',
+              membershipPending: true
+            });
+          }
+        }
+      }
+    }
+
+    if (claims.userPendingCount(board, req.user.id) >= claims.MAX_PENDING_PER_USER) {
+      return res.status(429).json({ error: `You already have ${claims.MAX_PENDING_PER_USER} squares waiting on approval — hang tight.` });
+    }
+
+    board.requests = board.requests || [];
+    const request = {
+      id: uuidv4(),
+      squareNumber,
+      userId: req.user.id,
+      userName: req.user.name,
+      requestedAt: new Date().toISOString(),
+      status: 'pending'
+    };
+
+    if (claims.claimMode(board) === 'auto') {
+      request.status = 'accepted';
+      board.requests.push(request);
+      await assignSquareToUser(board, claims.squareByNumber(board, squareNumber), req.user);
+      await storage.saveBoard(board);
+      await notify.notifySquareAssigned({
+        user: req.user, board, squareNumbers: [squareNumber],
+        amountOwed: claims.amountOwed(board, req.user.id),
+        paymentMethods: league?.paymentMethods || [],
+        origin: getOrigin(req), reason: 'approved'
+      });
+      return res.json({ accepted: true, board: await sharedBoardPayload(board, req.user) });
+    }
+
+    board.requests.push(request);
+    await notify.notifyOwnerOfPending({
+      ownerId: board.ownerId,
+      subjectEntity: board,
+      kind: 'square',
+      count: claims.pendingRequests(board).length,
+      url: `/board/${board.id}`,
+      origin: getOrigin(req)
+    });
+    await storage.saveBoard(board);
+    res.json({ accepted: false, board: await sharedBoardPayload(board, req.user) });
+  } catch (error) {
+    console.error('Error requesting square:', error);
+    res.status(500).json({ error: 'Failed to request square' });
+  }
+});
+
+// Change of heart: cancel your own pending request
+app.delete('/api/share/:token/requests/:squareNumber', requireAuth, async (req, res) => {
+  try {
+    const board = await loadSharedBoard(req, res);
+    if (!board) return;
+
+    const squareNumber = parseInt(req.params.squareNumber, 10);
+    const request = claims.pendingForSquare(board, squareNumber);
+    if (!request || request.userId !== req.user.id) {
+      return res.status(404).json({ error: 'You have no pending request on that square' });
+    }
+    request.status = 'cancelled';
+    await backfillFromWaitlist(board, getOrigin(req));
+    await storage.saveBoard(board);
+    res.json({ board: await sharedBoardPayload(board, req.user) });
+  } catch (error) {
+    console.error('Error cancelling request:', error);
+    res.status(500).json({ error: 'Failed to cancel request' });
+  }
+});
+
+// Join or leave the waitlist on a board with nothing left to request
+app.post('/api/share/:token/waitlist', requireAuth, async (req, res) => {
+  try {
+    const board = await loadSharedBoard(req, res);
+    if (!board) return;
+    if (!claims.waitlistOpen(board)) {
+      return res.status(400).json({ error: 'This board still has open squares — request one directly.' });
+    }
+    if (board.leagueId) {
+      const league = await storage.getLeagueById(board.leagueId);
+      if (league && claims.memberStatus(league, req.user.id) !== 'active' && league.ownerId !== req.user.id) {
+        return res.status(403).json({ error: 'Join the league first, then hop on the waitlist.' });
+      }
+    }
+    board.waitlist = board.waitlist || [];
+    if (!board.waitlist.some(w => w.userId === req.user.id)) {
+      board.waitlist.push({ userId: req.user.id, name: req.user.name, joinedAt: new Date().toISOString() });
+      await storage.saveBoard(board);
+    }
+    res.json({ board: await sharedBoardPayload(board, req.user) });
+  } catch (error) {
+    console.error('Error joining waitlist:', error);
+    res.status(500).json({ error: 'Failed to join waitlist' });
+  }
+});
+
+app.delete('/api/share/:token/waitlist', requireAuth, async (req, res) => {
+  try {
+    const board = await loadSharedBoard(req, res);
+    if (!board) return;
+    board.waitlist = (board.waitlist || []).filter(w => w.userId !== req.user.id);
+    await storage.saveBoard(board);
+    res.json({ board: await sharedBoardPayload(board, req.user) });
+  } catch (error) {
+    console.error('Error leaving waitlist:', error);
+    res.status(500).json({ error: 'Failed to leave waitlist' });
+  }
+});
+
+// Commissioner decides a pending request
+app.put('/api/boards/:id/requests/:requestId', async (req, res) => {
+  try {
+    const board = await loadEditableBoard(req, res);
+    if (!board) return;
+
+    const request = (board.requests || []).find(r => r.id === req.params.requestId);
+    if (!request || request.status !== 'pending') {
+      return res.status(404).json({ error: 'That request is no longer pending' });
+    }
+
+    const { action } = req.body;
+    if (action === 'accept') {
+      const square = claims.squareByNumber(board, request.squareNumber);
+      if (!square || square.owner) {
+        request.status = 'denied';
+        await storage.saveBoard(board);
+        return res.status(409).json({ error: 'That square was already filled — the request has been cleared.', board: { ...board, canEdit: true } });
+      }
+      const user = await storage.getUserById(request.userId);
+      if (!user) {
+        request.status = 'denied';
+        await storage.saveBoard(board);
+        return res.status(410).json({ error: 'That account no longer exists', board: { ...board, canEdit: true } });
+      }
+      request.status = 'accepted';
+      await assignSquareToUser(board, square, user);
+      await storage.saveBoard(board);
+      const league = board.leagueId ? await storage.getLeagueById(board.leagueId) : null;
+      await notify.notifySquareAssigned({
+        user, board, squareNumbers: [request.squareNumber],
+        amountOwed: claims.amountOwed(board, user.id),
+        paymentMethods: league?.paymentMethods || [],
+        origin: getOrigin(req), reason: 'approved'
+      });
+    } else if (action === 'deny') {
+      request.status = 'denied';
+      await backfillFromWaitlist(board, getOrigin(req));
+      await storage.saveBoard(board);
+    } else {
+      return res.status(400).json({ error: 'action must be accept or deny' });
+    }
+
+    res.json({ ...board, canEdit: true });
+  } catch (error) {
+    console.error('Error deciding request:', error);
+    res.status(500).json({ error: 'Failed to update request' });
+  }
+});
+
+// One-tap next week's board: same setup, blank squares, numbers undrawn
+app.post('/api/boards/:id/duplicate', async (req, res) => {
+  try {
+    const board = await loadEditableBoard(req, res);
+    if (!board) return;
+
+    const gridSize = board.type === '5x5' ? 5 : 10;
+    let squares;
+    if (board.type === 'strip-10') {
+      squares = Array.from({ length: 10 }, (_, i) => ({ number: i + 1, xDigits: [], yDigits: [], owner: '' }));
+    } else {
+      squares = [];
+      let squareNum = 1;
+      for (let row = 0; row < gridSize; row++) {
+        for (let col = 0; col < gridSize; col++) {
+          squares.push({ number: squareNum++, row, col, owner: '' });
+        }
+      }
+    }
+
+    const copy = {
+      id: uuidv4(),
+      name: sanitizeName(req.body.name, 100) || board.name,
+      type: board.type,
+      xTeamName: board.xTeamName,
+      yTeamName: board.yTeamName,
+      xAxis: [],
+      yAxis: [],
+      prizes: { ...(board.prizes || {}) },
+      squares,
+      currentScore: { xTeam: 0, yTeam: 0 },
+      gamePhase: 'pre-game',
+      periodResults: {},
+      payments: {},
+      requests: [],
+      waitlist: [],
+      claimMode: claims.claimMode(board),
+      squarePrice: board.squarePrice || 0,
+      shareToken: uuidv4(),
+      createdAt: new Date().toISOString(),
+      ownerId: board.ownerId
+    };
+    if (board.leagueId) {
+      copy.leagueId = board.leagueId;
+      copy.leagueName = board.leagueName;
+    }
+
+    await storage.saveBoard(copy);
+    res.status(201).json({ ...copy, canEdit: true });
+  } catch (error) {
+    console.error('Error duplicating board:', error);
+    res.status(500).json({ error: 'Failed to duplicate board' });
+  }
+});
+
+// ----- per-account preferences & push subscriptions -----
+
+app.put('/api/me/prefs', requireAuth, async (req, res) => {
+  try {
+    const user = req.user;
+    user.prefs = user.prefs || {};
+    if (req.body.hidePaymentInfo && typeof req.body.hidePaymentInfo === 'object') {
+      user.prefs.hidePaymentInfo = { ...(user.prefs.hidePaymentInfo || {}) };
+      for (const [leagueId, hidden] of Object.entries(req.body.hidePaymentInfo)) {
+        if (hidden) user.prefs.hidePaymentInfo[String(leagueId).slice(0, 64)] = true;
+        else delete user.prefs.hidePaymentInfo[leagueId];
+      }
+    }
+    await storage.saveUser(user);
+    res.json({ prefs: user.prefs });
+  } catch (error) {
+    console.error('Error saving prefs:', error);
+    res.status(500).json({ error: 'Failed to save preferences' });
+  }
+});
+
+app.get('/api/push/config', (req, res) => {
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
+});
+
+app.post('/api/me/push-subscriptions', requireAuth, async (req, res) => {
+  try {
+    const sub = req.body.subscription;
+    if (!sub || typeof sub.endpoint !== 'string' || !sub.endpoint.startsWith('https://')) {
+      return res.status(400).json({ error: 'Invalid push subscription' });
+    }
+    const user = req.user;
+    user.pushSubscriptions = (user.pushSubscriptions || []).filter(s => s.endpoint !== sub.endpoint);
+    user.pushSubscriptions.push({ endpoint: sub.endpoint, keys: sub.keys, expirationTime: sub.expirationTime || null, addedAt: new Date().toISOString() });
+    user.pushSubscriptions = user.pushSubscriptions.slice(-5); // a device per hand is plenty
+    await storage.saveUser(user);
+    res.json({ subscribed: true });
+  } catch (error) {
+    console.error('Error saving push subscription:', error);
+    res.status(500).json({ error: 'Failed to save push subscription' });
+  }
+});
+
+app.delete('/api/me/push-subscriptions', requireAuth, async (req, res) => {
+  try {
+    const endpoint = String(req.body.endpoint || '');
+    req.user.pushSubscriptions = (req.user.pushSubscriptions || []).filter(s => s.endpoint !== endpoint);
+    await storage.saveUser(req.user);
+    res.json({ subscribed: false });
+  } catch (error) {
+    console.error('Error removing push subscription:', error);
+    res.status(500).json({ error: 'Failed to remove push subscription' });
   }
 });
 

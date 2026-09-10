@@ -51,6 +51,42 @@ function LeagueView() {
     if (ok) navigate('/leagues')
   }
 
+  const decideMember = async (userId, action) => {
+    if (action === 'ban' && !confirm('Ban this member? Their pending requests are denied and they lose access to the league.')) return
+    const { ok, data } = await apiFetch(`/api/leagues/${id}/joined/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ action })
+    })
+    if (ok) setLeague(prev => ({ ...prev, joinedMembers: data.joinedMembers }))
+  }
+
+  const setJoinMode = async (joinMode) => {
+    const { ok, data } = await apiFetch(`/api/leagues/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ joinMode })
+    })
+    if (ok) setLeague(prev => ({ ...prev, joinMode: data.joinMode, joinedMembers: data.joinedMembers }))
+  }
+
+  const savePaymentMethods = async (methods) => {
+    const { ok, data } = await apiFetch(`/api/leagues/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ paymentMethods: methods })
+    })
+    if (ok) setLeague(prev => ({ ...prev, paymentMethods: data.paymentMethods }))
+    return ok
+  }
+
+  const addPaymentMethod = async (e) => {
+    e.preventDefault()
+    const form = e.target
+    const type = form.elements.payType.value
+    const handle = form.elements.payHandle.value.trim()
+    if (!handle) return
+    const ok = await savePaymentMethods([...(league.paymentMethods || []), { type, handle }])
+    if (ok) form.reset()
+  }
+
   const shareUrl = league ? `${window.location.origin}/league/share/${league.shareToken}` : ''
 
   const copyShareLink = async () => {
@@ -166,6 +202,77 @@ function LeagueView() {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="card">
+            <h3>Joined Members</h3>
+            <div className="plab-seg" role="group" aria-label="Join mode" style={{ marginBottom: '10px' }}>
+              <button type="button" aria-pressed={(league.joinMode || 'approval') === 'approval'} onClick={() => setJoinMode('approval')}>
+                You approve joins
+              </button>
+              <button type="button" aria-pressed={league.joinMode === 'auto'} onClick={() => setJoinMode('auto')}>
+                Auto-accept
+              </button>
+            </div>
+            <p className="live-hint">
+              People join from your share link. Members can request squares on any board set to take requests.
+            </p>
+            {(league.joinedMembers || []).length === 0 ? (
+              <p className="live-hint">Nobody has joined yet — post the share link in your group.</p>
+            ) : (
+              <div className="roster-list">
+                {(league.joinedMembers || []).filter(m => m.status === 'pending').map(member => (
+                  <div key={member.userId} className="roster-row pending-row">
+                    <span>{member.name} <span className="pending-pill">wants to join</span></span>
+                    <span className="member-actions">
+                      <button className="btn-record" onClick={() => decideMember(member.userId, 'approve')}>Approve</button>
+                      <button className="roster-remove" onClick={() => decideMember(member.userId, 'deny')}>Deny</button>
+                    </span>
+                  </div>
+                ))}
+                {(league.joinedMembers || []).filter(m => m.status === 'active').map(member => (
+                  <div key={member.userId} className="roster-row">
+                    <span>{member.name}</span>
+                    <button className="roster-remove" title="Ban from league" onClick={() => decideMember(member.userId, 'ban')}>Ban</button>
+                  </div>
+                ))}
+                {(league.joinedMembers || []).filter(m => m.status === 'banned').map(member => (
+                  <div key={member.userId} className="roster-row banned-row">
+                    <span style={{ textDecoration: 'line-through', opacity: 0.6 }}>{member.name}</span>
+                    <button className="btn-record" onClick={() => decideMember(member.userId, 'unban')}>Unban</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h3>How People Pay You</h3>
+            <p className="live-hint">
+              Shown (with a QR code) to members the moment they get a square — no more chasing.
+            </p>
+            {(league.paymentMethods || []).map((method, idx) => (
+              <div key={idx} className="roster-row" style={{ marginBottom: '6px' }}>
+                <span><strong style={{ textTransform: 'capitalize' }}>{method.type}</strong> · {method.handle}</span>
+                <button
+                  className="roster-remove"
+                  onClick={() => savePaymentMethods(league.paymentMethods.filter((_, i) => i !== idx))}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            <form className="pay-method-form" onSubmit={addPaymentMethod}>
+              <select name="payType" defaultValue="venmo">
+                <option value="venmo">Venmo</option>
+                <option value="paypal">PayPal</option>
+                <option value="zelle">Zelle</option>
+                <option value="cashapp">Cash App</option>
+                <option value="other">Other</option>
+              </select>
+              <input name="payHandle" type="text" placeholder="@handle, email, or link" maxLength={120} />
+              <button type="submit" className="btn btn-primary btn-small">Add</button>
+            </form>
           </div>
 
           <div className="card">

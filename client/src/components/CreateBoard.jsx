@@ -16,6 +16,7 @@ function CreateBoard() {
   const [xTeamName, setXTeamName] = useState('')
   const [yTeamName, setYTeamName] = useState('')
   const [numbersMode, setNumbersMode] = useState('later') // 'later' | 'manual'
+  const [claimMode, setClaimMode] = useState(leagueId ? 'approval' : 'admin')
   const [xAxis, setXAxis] = useState(Array(10).fill(''))
   const [yAxis, setYAxis] = useState(Array(10).fill(''))
   const [prizes, setPrizes] = useState({ q1: '', half: '', q3: '', final: '' })
@@ -197,8 +198,12 @@ function CreateBoard() {
         boardPayload.liveGame = { eventId: selectedGame.id, xTeamSide }
       }
 
+      boardPayload.claimMode = claimMode
+
       if (importedSquares && importedSquares.length > 0) {
         boardPayload.squares = importedSquares
+      } else if (boardType === 'strip-10' && numbersMode === 'later') {
+        boardPayload.drawLater = true
       }
 
       const { ok, data } = await apiFetch('/api/boards', {
@@ -366,14 +371,38 @@ function CreateBoard() {
 
         {boardType === 'strip-10' ? (
           <div className="axis-input-group">
-            <h4 style={{ color: '#8892b0', margin: 0 }}>10-Strip Configuration</h4>
+            <h4 style={{ color: '#8892b0', margin: 0 }}>10-Strip Numbers</h4>
             <p style={{ color: '#8892b0', fontSize: '0.9rem', marginTop: '10px' }}>
-              Each of the 10 squares will be randomly assigned 5 numbers from {xTeamName || 'X-Team'} and 2 numbers from {yTeamName || 'Y-Team'}.
-              This gives each square 10 possible winning score combinations (5 x 2).
+              Each of the 10 squares gets 5 {xTeamName || 'X-Team'} numbers and 2 {yTeamName || 'Y-Team'} numbers
+              (10 winning score combinations per square), distributed so every possible score has exactly one winner.
             </p>
-            <p style={{ color: '#64ffda', fontSize: '0.85rem', marginTop: '5px' }}>
-              Numbers are distributed so every possible score has exactly one winner. You can edit any square's digits later from the board view.
-            </p>
+            <div className="numbers-mode">
+              <label className={numbersMode === 'later' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="numbers-mode"
+                  checked={numbersMode === 'later'}
+                  onChange={() => setNumbersMode('later')}
+                />
+                <span>
+                  <strong>Draw numbers later</strong> (recommended) — people claim squares 1–10 first
+                  with no numbers showing, then you run the draw from the board page (or type in a
+                  draw you did elsewhere) once the board is full.
+                </span>
+              </label>
+              <label className={numbersMode === 'manual' ? 'selected' : ''}>
+                <input
+                  type="radio"
+                  name="numbers-mode"
+                  checked={numbersMode === 'manual'}
+                  onChange={() => setNumbersMode('manual')}
+                />
+                <span>
+                  <strong>Assign numbers now</strong> — squares get their digits immediately, so
+                  people can see the numbers while claiming.
+                </span>
+              </label>
+            </div>
           </div>
         ) : (
           <div className="axis-input-group">
@@ -454,6 +483,24 @@ function CreateBoard() {
             )}
           </div>
         )}
+
+        <div className="axis-input-group">
+          <h4 style={{ margin: 0 }}>How People Get Squares</h4>
+          <div className="numbers-mode">
+            <label className={claimMode === 'approval' ? 'selected' : ''}>
+              <input type="radio" name="claim-mode" checked={claimMode === 'approval'} onChange={() => setClaimMode('approval')} />
+              <span><strong>They request, you approve</strong> — anyone with the link (league members) taps a square, you accept or deny with one tap.</span>
+            </label>
+            <label className={claimMode === 'auto' ? 'selected' : ''}>
+              <input type="radio" name="claim-mode" checked={claimMode === 'auto'} onChange={() => setClaimMode('auto')} />
+              <span><strong>Auto-accept</strong> — first tap takes the square instantly, no approval step.</span>
+            </label>
+            <label className={claimMode === 'admin' ? 'selected' : ''}>
+              <input type="radio" name="claim-mode" checked={claimMode === 'admin'} onChange={() => setClaimMode('admin')} />
+              <span><strong>You assign everything</strong> — squares only change when you edit them.</span>
+            </label>
+          </div>
+        </div>
 
         <div className="axis-input-group">
           <h4>Money (Optional)</h4>

@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
+  strip10BlocksFromPermutations,
   generateStrip10Assignments,
+  boardHasAxes,
   findWinningSquares,
   checkCurrentWinners,
   calculateWinningScores,
@@ -214,4 +216,57 @@ test('latestCompletedPeriod ignores no-ops, reversals, and unknown phases', () =
   assert.strictEqual(latestCompletedPeriod('Final', '3rd Quarter'), null);
   assert.strictEqual(latestCompletedPeriod('weird', 'Final'), null);
   assert.strictEqual(latestCompletedPeriod('1st Quarter', 'nonsense'), null);
+});
+
+// ----- strip-10 draw-later flow -----
+
+test('strip10BlocksFromPermutations assigns spots in reading order', () => {
+  // The Bomb Sports sheet: Jets 4 1 2 7 6 | 5 0 3 8 9, Giants pairs 3-0, 9-5, 1-8, 4-6, 7-2
+  const blocks = strip10BlocksFromPermutations(
+    [4, 1, 2, 7, 6, 5, 0, 3, 8, 9],
+    [3, 0, 9, 5, 1, 8, 4, 6, 7, 2]
+  );
+  assert.strictEqual(blocks.length, 10);
+  assert.deepStrictEqual(blocks[0], { xDigits: [1, 2, 4, 6, 7], yDigits: [0, 3] }); // spot 1
+  assert.deepStrictEqual(blocks[1], { xDigits: [0, 3, 5, 8, 9], yDigits: [0, 3] }); // spot 2
+  assert.deepStrictEqual(blocks[2], { xDigits: [1, 2, 4, 6, 7], yDigits: [5, 9] }); // spot 3
+  assert.deepStrictEqual(blocks[9], { xDigits: [0, 3, 5, 8, 9], yDigits: [2, 7] }); // spot 10
+});
+
+test('strip10BlocksFromPermutations partitions all 100 score combos exactly once', () => {
+  const blocks = strip10BlocksFromPermutations(
+    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  );
+  const seen = new Set();
+  for (const block of blocks) {
+    for (const x of block.xDigits) {
+      for (const y of block.yDigits) {
+        seen.add(`${x}-${y}`);
+      }
+    }
+  }
+  assert.strictEqual(seen.size, 100);
+});
+
+test('boardHasAxes: strip boards are drawn only once every square has digits', () => {
+  const drawn = {
+    type: 'strip-10',
+    squares: strip10BlocksFromPermutations(
+      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    ).map((b, i) => ({ number: i + 1, ...b }))
+  };
+  assert.strictEqual(boardHasAxes(drawn), true);
+
+  const pending = {
+    type: 'strip-10',
+    squares: Array.from({ length: 10 }, (_, i) => ({ number: i + 1, xDigits: [], yDigits: [] }))
+  };
+  assert.strictEqual(boardHasAxes(pending), false);
+  assert.strictEqual(boardHasAxes({ type: 'strip-10', squares: [] }), false);
+
+  // Winners never compute on a pending strip
+  pending.currentScore = { xTeam: 13, yTeam: 3 };
+  pending.gamePhase = '2nd Quarter';
+  assert.deepStrictEqual(findWinningSquares(pending), []);
 });

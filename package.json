@@ -9,7 +9,7 @@
     "client": "cd client && npm run dev",
     "build": "cd client && npm run build",
     "start": "cross-env NODE_ENV=production node server/index.js",
-    "test": "node --test server/gameLogic.test.js server/llmService.test.js server/nflService.test.js server/authService.test.js server/analyticsService.test.js server/googleAuth.test.js server/emailCampaigns.test.js",
+    "test": "node --test server/gameLogic.test.js server/llmService.test.js server/nflService.test.js server/authService.test.js server/analyticsService.test.js server/googleAuth.test.js server/emailCampaigns.test.js server/claimsService.test.js",
     "install:all": "npm install && cd client && npm install"
   },
   "dependencies": {
@@ -17,7 +17,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
