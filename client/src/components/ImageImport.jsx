@@ -1,65 +1,30 @@
 import { useState, useRef, useEffect } from 'react'
+import { apiFetch } from '../api'
 
 function ImageImport({ onImportComplete }) {
   const [image, setImage] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
-  const [provider, setProvider] = useState('gemini')
-  const [apiKey, setApiKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [showApiKey, setShowApiKey] = useState(false)
-  const [configuredProviders, setConfiguredProviders] = useState([])
-  const [useServerKeys, setUseServerKeys] = useState(false)
-  const [orModel, setOrModel] = useState(localStorage.getItem('openrouterModel') || '')
-  const [orDefaultModel, setOrDefaultModel] = useState('google/gemini-2.5-flash-lite')
+  const [available, setAvailable] = useState(true)
   const fileInputRef = useRef(null)
 
-  // Check for server-configured providers on mount
+  // Import runs on the app's own AI key — all the client needs to know is
+  // whether the server has one.
   useEffect(() => {
-    const checkProviders = async () => {
-      try {
-        const response = await fetch('/api/llm-providers')
-        const data = await response.json()
-        if (data.openrouterDefaultModel) {
-          setOrDefaultModel(data.openrouterDefaultModel)
-        }
-        if (data.hasConfiguredProviders) {
-          setConfiguredProviders(data.providers)
-          setUseServerKeys(true)
-          // Set first configured provider as default
-          if (data.providers.length > 0) {
-            setProvider(data.providers[0].id)
-          }
-        } else {
-          // Fall back to localStorage for manual keys
-          const savedProvider = localStorage.getItem('llmProvider') || 'gemini'
-          setProvider(savedProvider)
-          setApiKey(localStorage.getItem(`apiKey_${savedProvider}`) || '')
-        }
-      } catch (err) {
-        // If server check fails, fall back to manual mode
-        const savedProvider = localStorage.getItem('llmProvider') || 'gemini'
-        setProvider(savedProvider)
-        setApiKey(localStorage.getItem(`apiKey_${savedProvider}`) || '')
-      }
+    // Clear keys the old bring-your-own-key form left in this browser
+    for (const provider of ['gemini', 'openai', 'claude', 'openrouter']) {
+      localStorage.removeItem(`apiKey_${provider}`)
     }
-    checkProviders()
+    localStorage.removeItem('llmProvider')
+    localStorage.removeItem('openrouterModel')
+
+    const checkAvailability = async () => {
+      const { ok, data } = await apiFetch('/api/llm-providers')
+      setAvailable(ok ? Boolean(data.available) : false)
+    }
+    checkAvailability()
   }, [])
-
-  // Update API key when provider changes (only for manual mode)
-  useEffect(() => {
-    if (!useServerKeys) {
-      const savedKey = localStorage.getItem(`apiKey_${provider}`) || ''
-      setApiKey(savedKey)
-      localStorage.setItem('llmProvider', provider)
-    }
-  }, [provider, useServerKeys])
-
-  // Save API key when it changes
-  const handleApiKeyChange = (value) => {
-    setApiKey(value)
-    localStorage.setItem(`apiKey_${provider}`, value)
-  }
 
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0]
@@ -105,46 +70,22 @@ function ImageImport({ onImportComplete }) {
       return
     }
 
-    if (!useServerKeys && !apiKey) {
-      setError('Please enter your API key')
-      return
-    }
-
     setLoading(true)
     setError(null)
 
-    try {
-      const body = {
-        image: imagePreview,
-        provider
-      }
-      // Only include apiKey if not using server keys
-      if (!useServerKeys) {
-        body.apiKey = apiKey
-      }
-      // OpenRouter can route to any vision model the user names
-      if (provider === 'openrouter' && orModel.trim()) {
-        body.model = orModel.trim()
-      }
+    const { ok, data } = await apiFetch('/api/parse-image', {
+      method: 'POST',
+      body: JSON.stringify({ image: imagePreview })
+    })
 
-      const response = await fetch('/api/parse-image', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
+    setLoading(false)
 
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to parse image')
-      }
-
-      onImportComplete(data)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
+    if (!ok) {
+      setError(data.error || 'Failed to parse image')
+      return
     }
+
+    onImportComplete(data)
   }
 
   const clearImage = () => {
@@ -156,47 +97,6 @@ function ImageImport({ onImportComplete }) {
     }
   }
 
-  const getProviderLabel = (p) => {
-    switch (p) {
-      case 'gemini': return 'Google Gemini'
-      case 'claude': return 'Anthropic Claude'
-      case 'openai': return 'OpenAI'
-      case 'openrouter': return 'OpenRouter'
-      default: return p
-    }
-  }
-
-  const getApiKeyPlaceholder = () => {
-    switch (provider) {
-      case 'gemini': return 'Enter your Google AI API key'
-      case 'claude': return 'Enter your Anthropic API key'
-      case 'openai': return 'Enter your OpenAI API key'
-      case 'openrouter': return 'Enter your OpenRouter API key'
-      default: return 'Enter API key'
-    }
-  }
-
-  const handleOrModelChange = (value) => {
-    setOrModel(value)
-    localStorage.setItem('openrouterModel', value)
-  }
-
-  const openrouterModelField = provider === 'openrouter' && (
-    <div className="form-group">
-      <label>Model (any OpenRouter vision model)</label>
-      <input
-        type="text"
-        value={orModel}
-        onChange={(e) => handleOrModelChange(e.target.value)}
-        placeholder={orDefaultModel}
-      />
-      <small className="api-key-hint">
-        Leave blank for the default ({orDefaultModel}). Browse models at openrouter.ai/models —
-        e.g. anthropic/claude-sonnet-5, openai/gpt-4o-mini.
-      </small>
-    </div>
-  )
-
   return (
     <div className="image-import">
       <h4>Import from Image</h4>
@@ -204,62 +104,11 @@ function ImageImport({ onImportComplete }) {
         Upload a screenshot of your football squares grid and we'll extract all the data automatically.
       </p>
 
-      {/* Provider Selection */}
-      <div className="import-settings">
-        {useServerKeys ? (
-          /* Server-configured providers */
-          <div className="form-group">
-            <label>AI Provider</label>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-              {configuredProviders.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <small className="api-key-hint configured">
-              API key configured in .env file
-            </small>
-            {openrouterModelField}
-          </div>
-        ) : (
-          /* Manual API key entry */
-          <>
-            <div className="form-group">
-              <label>AI Provider</label>
-              <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                <option value="gemini">Google Gemini (Cheapest)</option>
-                <option value="openai">OpenAI GPT-4o-mini</option>
-                <option value="claude">Anthropic Claude</option>
-                <option value="openrouter">OpenRouter (any model)</option>
-              </select>
-            </div>
-
-            {openrouterModelField}
-
-            <div className="form-group">
-              <label>API Key for {getProviderLabel(provider)}</label>
-              <div className="api-key-input">
-                <input
-                  type={showApiKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={(e) => handleApiKeyChange(e.target.value)}
-                  placeholder={getApiKeyPlaceholder()}
-                />
-                <button
-                  type="button"
-                  className="btn btn-icon"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  title={showApiKey ? 'Hide API key' : 'Show API key'}
-                >
-                  {showApiKey ? '🙈' : '👁️'}
-                </button>
-              </div>
-              <small className="api-key-hint">
-                Tip: Add API keys to .env file to skip this step
-              </small>
-            </div>
-          </>
-        )}
-      </div>
+      {!available && (
+        <div className="import-error">
+          Image import is unavailable right now — enter your board details manually below.
+        </div>
+      )}
 
       {/* Drop Zone + Browse Button */}
       {imagePreview ? (
@@ -317,7 +166,7 @@ function ImageImport({ onImportComplete }) {
         type="button"
         className="btn btn-primary import-btn"
         onClick={handleImport}
-        disabled={!image || (!useServerKeys && !apiKey) || loading}
+        disabled={!image || !available || loading}
       >
         {loading ? (
           <>

@@ -19,7 +19,7 @@ New visitors get a marketing landing page at `/`; the app itself lives at `/boar
   - **10x10 Grid** — 100 squares, one digit per axis header
   - **5x5 Grid** — 25 squares, two digits per axis header (4 winning combos per square)
   - **10-Strip** — 10 squares, each covering 5 digits for one team and 2 for the other (10 winning combos per square). Digit assignments are generated so every possible score has exactly one winner, and can be edited per square afterwards.
-- **Import from a Photo**: Upload a screenshot or photo of a real squares board and an AI provider (Gemini, OpenAI, or Claude) extracts the teams, axis digits, owners, and prizes. Any digits the AI had to auto-correct are flagged for you to verify.
+- **Import from a Photo**: Upload a screenshot or photo of a real squares board and AI extracts the teams, axis digits, owners, and prizes. Any digits the AI had to auto-correct are flagged for you to verify. It runs on the app's own API key — signed-in users never supply one.
 - **Square Tracking**: Enter your square numbers to highlight them on the board — they're remembered per board on your device.
 - **Winning Combinations**: See all the score combinations that would result in a win for your squares, with realistic example scores.
 - **Live NFL Scores**: Link a board to a real NFL game (via ESPN's public scoreboard) and the score and quarter update automatically — every 30 seconds while the game is live. Pick the game from a list, confirm which team is on which axis (auto-suggested from your team names), and watch the winning square move in real time.
@@ -61,8 +61,8 @@ already configured and walks through the remaining one-time setup tasks
 
 | Variable | Purpose |
 |---|---|
-| `GEMINI_API_KEY` / `OPENAI_API_KEY` / `CLAUDE_API_KEY` | Enables image import with that provider (users can also paste a key in the UI) |
-| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | Image import through [OpenRouter](https://openrouter.ai) — one key, any vision model; users can name a model per-import |
+| `GEMINI_API_KEY` / `OPENAI_API_KEY` / `CLAUDE_API_KEY` | Fallback providers for image import, used only when `OPENROUTER_API_KEY` is unset |
+| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | Image import through [OpenRouter](https://openrouter.ai) — the intended provider. One key serves every user; `OPENROUTER_MODEL` picks the vision model |
 | `GOOGLE_CLIENT_ID` | Enables "Sign in with Google" (OAuth web client ID; no secret needed) |
 | `RESEND_API_KEY` / `EMAIL_FROM` | Password-reset emails via [Resend](https://resend.com). Unset = reset links are logged to the server console |
 | `APP_URL` | Public origin for reset links; defaults to the request host |
@@ -102,8 +102,8 @@ The repo includes `vercel.json` and a serverless entry point (`api/index.js`) �
 - `PUT /api/boards/:id/period-result` - Record/clear the winner snapshot for `q1|half|q3|final`
 - `GET /api/boards/:id/my-squares?squares=1,2,3` - Winning combinations + current winners for specific squares
 - `DELETE /api/boards/:id` - Delete a board
-- `GET /api/llm-providers` - Which AI providers have server-configured keys
-- `POST /api/parse-image` - Extract board data from an image via Gemini/OpenAI/Claude
+- `GET /api/llm-providers` - Whether image import is available on this deployment (`{ available }`)
+- `POST /api/parse-image` - Extract board data from an image (requires an account; runs on the server's key)
 - `GET /api/health` - Health check; reports which storage backend is active
 - `GET /api/nfl/scoreboard?dates=YYYYMMDD` - List NFL games from ESPN (defaults to the current week)
 - `PUT /api/boards/:id/live-game` - Link (`{eventId, xTeamSide}`) or unlink (`{clear: true}`) a live NFL game

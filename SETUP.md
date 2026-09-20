@@ -129,11 +129,13 @@ breaks. On iPhone, push only works once the site is added to the Home Screen
 
 ### 9. Optional: AI square-sheet import
 
-The "import from image" feature needs one AI provider key; without one, users
-can still paste their own key in the UI. Cheapest hands-off option:
+The "import from image" feature runs on the app's own key — users never enter
+one, so without a key configured the feature is simply unavailable. Set
 `OPENROUTER_API_KEY` from [openrouter.ai](https://openrouter.ai) (defaults to
-`google/gemini-2.5-flash-lite`; override with `OPENROUTER_MODEL` or per-import
-in the UI). Alternatives: `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CLAUDE_API_KEY`.
+the `google/gemini-2.5-flash-lite` model; change it with `OPENROUTER_MODEL`).
+Fallbacks if that is unset: `GEMINI_API_KEY`, `OPENAI_API_KEY`,
+`CLAUDE_API_KEY`. Every import is billed to this key, so watch spend at
+openrouter.ai — it is only gated by requiring a signed-in account today.
 
 ### 10. Optional: receiving email at @squareszn.com
 
