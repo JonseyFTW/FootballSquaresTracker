@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
-const { parseImage, DEFAULT_OPENROUTER_MODEL } = require('./llmService');
+const { parseImage } = require('./llmService');
 const { getScoreboard, getGame, applyGameToBoard, completedPeriodScores } = require('./nflService');
 const storage = require('./storage');
 const auth = require('./authService');
@@ -34,10 +34,13 @@ const API_KEYS = {
   openrouter: process.env.OPENROUTER_API_KEY
 };
 
+// Image import always runs on the app's own key — nobody brings their own.
+// OpenRouter is the intended provider; the rest are fallbacks if that key
+// is missing but another one is set.
+const IMPORT_PROVIDER_ORDER = ['openrouter', 'gemini', 'openai', 'claude'];
+const importProvider = () => IMPORT_PROVIDER_ORDER.find(p => API_KEYS[p]) || null;
+
 const BOARD_TYPES = ['5x5', '10x10', 'strip-10'];
-const LLM_PROVIDERS = ['gemini', 'openai', 'claude', 'openrouter'];
-// OpenRouter model ids look like "vendor/model-name[:variant]"
-const OPENROUTER_MODEL_RE = /^[\w.\-\/:]{1,100}$/;
 const PERIODS = ['q1', 'half', 'q3', 'final'];
 const MAX_OWNER_LENGTH = 60;
 const MAX_PHASE_LENGTH = 30;
@@ -1969,43 +1972,25 @@ app.post('/api/share/:token/sync-live', async (req, res) => {
 // LLM image import
 // ============================================================
 
+// Is image import available on this deployment? The client only needs to
+// know whether to offer it — never which provider or model runs it.
 app.get('/api/llm-providers', (req, res) => {
-  const providers = [];
-
-  if (API_KEYS.gemini) {
-    providers.push({ id: 'gemini', name: 'Google Gemini', configured: true });
-  }
-  if (API_KEYS.openai) {
-    providers.push({ id: 'openai', name: 'OpenAI GPT-4o-mini', configured: true });
-  }
-  if (API_KEYS.claude) {
-    providers.push({ id: 'claude', name: 'Anthropic Claude', configured: true });
-  }
-  if (API_KEYS.openrouter) {
-    providers.push({ id: 'openrouter', name: 'OpenRouter (any model)', configured: true, defaultModel: DEFAULT_OPENROUTER_MODEL });
-  }
-
-  res.json({ providers, hasConfiguredProviders: providers.length > 0, openrouterDefaultModel: DEFAULT_OPENROUTER_MODEL });
+  res.json({ available: Boolean(importProvider()) });
 });
 
-app.post('/api/parse-image', async (req, res) => {
+// Runs on the app's own API key, so it takes an account (and is where a
+// paid-plan check would go). Provider and model come from the environment.
+app.post('/api/parse-image', requireAuth, async (req, res) => {
   try {
-    const { image, provider, apiKey: clientApiKey, model } = req.body;
+    const { image } = req.body;
 
     if (!image || typeof image !== 'string') {
       return res.status(400).json({ error: 'No image provided' });
     }
 
-    if (!LLM_PROVIDERS.includes(provider)) {
-      return res.status(400).json({ error: 'No valid provider specified (gemini, claude, or openai)' });
-    }
-
-    const apiKey = API_KEYS[provider] || clientApiKey;
-
-    if (!apiKey) {
-      return res.status(400).json({
-        error: `No API key configured for ${provider}. Add ${provider.toUpperCase()}_API_KEY to your .env file or enter a key manually.`
-      });
+    const provider = importProvider();
+    if (!provider) {
+      return res.status(503).json({ error: 'Image import is not available right now.' });
     }
 
     const mimeMatch = image.match(/^data:(image\/[\w.+-]+);base64,/i);
@@ -2016,16 +2001,7 @@ app.post('/api/parse-image', async (req, res) => {
       return res.status(400).json({ error: 'Image data is empty' });
     }
 
-    // Model override is an OpenRouter feature — pick any vision model
-    let modelOverride;
-    if (provider === 'openrouter' && model !== undefined) {
-      if (typeof model !== 'string' || !OPENROUTER_MODEL_RE.test(model)) {
-        return res.status(400).json({ error: 'Invalid model id — use the OpenRouter format, e.g. google/gemini-2.5-flash-lite' });
-      }
-      modelOverride = model;
-    }
-
-    const result = await parseImage(base64Data, mimeType, provider, apiKey, { model: modelOverride });
+    const result = await parseImage(base64Data, mimeType, provider, API_KEYS[provider]);
     res.json(result);
   } catch (error) {
     console.error('Image parsing error:', error);
