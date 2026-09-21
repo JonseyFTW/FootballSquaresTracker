@@ -2005,7 +2005,7 @@ app.post('/api/parse-image', requireAuth, async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Image parsing error:', error);
-    res.status(500).json({ error: error.message });
+    res.status(error.timeout ? 504 : 500).json({ error: error.message });
   }
 });
 
