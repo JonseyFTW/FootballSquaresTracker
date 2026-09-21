@@ -5,6 +5,23 @@
 // tokens was tight enough to truncate mid-object, so give plenty of room.
 const MAX_OUTPUT_TOKENS = 8192;
 
+// Give up before the serverless function's own limit (see vercel.json), so
+// a slow model returns a readable error instead of a platform 504 page.
+const REQUEST_TIMEOUT_MS = 45000;
+
+async function fetchProvider(url, options) {
+  try {
+    return await fetch(url, { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  } catch (error) {
+    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+      const timeoutError = new Error('The AI took too long to read that image. Try again, or crop the photo to just the board.');
+      timeoutError.timeout = true;
+      throw timeoutError;
+    }
+    throw error;
+  }
+}
+
 const EXTRACTION_PROMPT = `Analyze this football squares grid image and extract all the data.
 
 First determine the board type:
@@ -76,7 +93,7 @@ Prize amounts should be numbers without $ symbol`;
 
 // Gemini API (Google AI)
 async function parseWithGemini(imageBase64, mimeType, apiKey) {
-  const response = await fetch(
+  const response = await fetchProvider(
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',
     {
       method: 'POST',
@@ -122,7 +139,7 @@ async function parseWithGemini(imageBase64, mimeType, apiKey) {
 
 // Claude API (Anthropic)
 async function parseWithClaude(imageBase64, mimeType, apiKey) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const response = await fetchProvider('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -169,7 +186,7 @@ async function parseWithClaude(imageBase64, mimeType, apiKey) {
 
 // OpenAI API
 async function parseWithOpenAI(imageBase64, mimeType, apiKey) {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetchProvider('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -217,7 +234,7 @@ async function parseWithOpenAI(imageBase64, mimeType, apiKey) {
 const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite';
 
 async function parseWithOpenRouter(imageBase64, mimeType, apiKey, model) {
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+  const response = await fetchProvider('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

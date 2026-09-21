@@ -1,6 +1,33 @@
 import { useState, useRef, useEffect } from 'react'
 import { apiFetch } from '../api'
 
+// Phone photos run 3000px+ wide. The model reads a board fine at a fraction
+// of that, and the full-size upload is most of why imports used to crawl (and
+// time out) on mobile data.
+const MAX_EDGE = 1600
+const JPEG_QUALITY = 0.9
+
+async function toUploadableImage(file) {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' })
+  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.round(bitmap.width * scale)
+  canvas.height = Math.round(bitmap.height * scale)
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  return canvas.toDataURL('image/jpeg', JPEG_QUALITY)
+}
+
+// Fall back to the raw file if this browser can't do the resize
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => resolve(e.target.result)
+    reader.onerror = () => reject(new Error('Could not read that file'))
+    reader.readAsDataURL(file)
+  })
+}
+
 function ImageImport({ onImportComplete }) {
   const [image, setImage] = useState(null)
   const [imagePreview, setImagePreview] = useState(null)
@@ -26,10 +53,7 @@ function ImageImport({ onImportComplete }) {
     checkAvailability()
   }, [])
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
+  const acceptFile = async (file) => {
     if (!file.type.startsWith('image/')) {
       setError('Please select an image file')
       return
@@ -38,26 +62,22 @@ function ImageImport({ onImportComplete }) {
     setError(null)
     setImage(file)
 
-    // Create preview
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      setImagePreview(e.target.result)
+    try {
+      setImagePreview(await toUploadableImage(file))
+    } catch {
+      setImagePreview(await readFileAsDataUrl(file))
     }
-    reader.readAsDataURL(file)
+  }
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (file) acceptFile(file)
   }
 
   const handleDrop = (e) => {
     e.preventDefault()
     const file = e.dataTransfer.files?.[0]
-    if (file && file.type.startsWith('image/')) {
-      setError(null)
-      setImage(file)
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setImagePreview(e.target.result)
-      }
-      reader.readAsDataURL(file)
-    }
+    if (file) acceptFile(file)
   }
 
   const handleDragOver = (e) => {
@@ -73,7 +93,7 @@ function ImageImport({ onImportComplete }) {
     setLoading(true)
     setError(null)
 
-    const { ok, data } = await apiFetch('/api/parse-image', {
+    const { ok, status, data } = await apiFetch('/api/parse-image', {
       method: 'POST',
       body: JSON.stringify({ image: imagePreview })
     })
@@ -81,7 +101,10 @@ function ImageImport({ onImportComplete }) {
     setLoading(false)
 
     if (!ok) {
-      setError(data.error || 'Failed to parse image')
+      // A gateway timeout has no JSON body of its own to explain itself
+      setError(data.error || (status === 504
+        ? 'That took too long to read. Try again, or crop the photo to just the board.'
+        : 'Failed to parse image'))
       return
     }
 
