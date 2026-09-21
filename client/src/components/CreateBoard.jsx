@@ -29,6 +29,9 @@ function CreateBoard() {
   const [importNotice, setImportNotice] = useState(null)
   const [importedGameName, setImportedGameName] = useState(null)
   const [showImport, setShowImport] = useState(false)
+  const [showGamePrompt, setShowGamePrompt] = useState(false)
+  const [promptGameId, setPromptGameId] = useState(null)
+  const [promptSide, setPromptSide] = useState(null)
 
   // NFL week game picker
   const [nflGames, setNflGames] = useState([])
@@ -55,6 +58,7 @@ function CreateBoard() {
   }, [leagueId])
 
   const selectedGame = nflGames.find(g => g.id === selectedGameId) || null
+  const promptGame = nflGames.find(g => g.id === promptGameId) || null
 
   const pickNflGame = (game) => {
     if (selectedGameId === game.id) {
@@ -79,6 +83,21 @@ function CreateBoard() {
   const changeSide = (side) => {
     setXTeamSide(side)
     if (selectedGame) applySides(selectedGame, side)
+  }
+
+  const openGamePrompt = () => {
+    setPromptGameId(selectedGameId)
+    setPromptSide(selectedGameId ? xTeamSide : null)
+    setShowGamePrompt(true)
+  }
+
+  // Both the game and the side are picked explicitly here — the import had
+  // no confident read on either, so nothing is defaulted.
+  const confirmGamePrompt = () => {
+    setSelectedGameId(promptGameId)
+    setXTeamSide(promptSide)
+    setImportedGameName(promptGame?.name || null)
+    setShowGamePrompt(false)
   }
 
   const handleXAxisChange = (index, value) => {
@@ -111,10 +130,16 @@ function CreateBoard() {
     setImportNotice(null)
 
     // The import matches the board's teams to this week's NFL game, so live
-    // scoring starts working without picking the matchup by hand.
+    // scoring starts working without picking the matchup by hand. When it
+    // can't be sure, ask outright rather than quietly leaving it unlinked.
     setSelectedGameId(data.game?.eventId ? String(data.game.eventId) : null)
     setImportedGameName(data.game?.name || null)
     if (data.game?.xTeamSide) setXTeamSide(data.game.xTeamSide === 'away' ? 'away' : 'home')
+    if (!data.game?.eventId) {
+      setPromptGameId(null)
+      setPromptSide(null)
+      setShowGamePrompt(true)
+    }
 
     if (data.type === 'strip-10') {
       setXAxis(Array(10).fill(''))
@@ -302,12 +327,25 @@ function CreateBoard() {
             <span>
               Imported a {importedType === 'strip-10' ? '10-strip' : importedType} board — {xTeamName} vs {yTeamName},{' '}
               {filledSquareCount} of {importedSquares?.length || 0} squares have owners.
-              {importedGameName && <> Live scores are linked to <strong>{importedGameName}</strong>.</>}
+              {selectedGameId && <> Live scores are linked to <strong>{selectedGame?.name || importedGameName}</strong>.</>}
             </span>
             <button type="button" className="btn btn-secondary btn-small" onClick={() => setShowImport(true)}>
               Import Another
             </button>
           </div>
+          {!selectedGameId && (
+            <div className="import-warnings">
+              <strong>No live game linked</strong> — scores won't track automatically until you pick the matchup.
+              <button
+                type="button"
+                className="btn btn-secondary btn-small"
+                style={{ marginLeft: '10px' }}
+                onClick={openGamePrompt}
+              >
+                Pick the game
+              </button>
+            </div>
+          )}
           {importWarnings.length > 0 && (
             <div className="import-warnings">
               <strong>Check these before creating the board:</strong>
@@ -578,6 +616,70 @@ function CreateBoard() {
           </button>
         </div>
       </form>
+
+      {/* An import that couldn't match a game asks for one outright, so a
+          board never quietly ends up without live scoring. */}
+      {showGamePrompt && (
+        <div className="modal-overlay" onClick={() => setShowGamePrompt(false)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h3>Which game is this board for?</h3>
+            <p className="live-hint">
+              We read <strong>{xTeamName || 'the top team'}</strong> vs <strong>{yTeamName || 'the left team'}</strong>{' '}
+              off your image but couldn't match that to a game on this week's schedule. Pick it here
+              and scores will track on their own.
+            </p>
+
+            {nflLoading ? (
+              <div className="loading" style={{ minHeight: '100px' }}><div className="spinner"></div></div>
+            ) : nflGames.length === 0 ? (
+              <p className="live-hint">No NFL games are scheduled this week — you can link one from the board page later.</p>
+            ) : (
+              <div className="game-list">
+                {nflGames.map(game => (
+                  <label key={game.id} className={`game-row ${promptGameId === game.id ? 'selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="import-game"
+                      checked={promptGameId === game.id}
+                      onChange={() => { setPromptGameId(game.id); setPromptSide(null) }}
+                    />
+                    <span className="game-name">{game.name}</span>
+                    <span className="game-state">{gameStateLabel(game)}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {promptGame && (
+              <div className="side-picker">
+                <p>Which team is <strong>{xTeamName || 'the top axis team'}</strong> (across the top)?</p>
+                <label>
+                  <input type="radio" name="import-side" checked={promptSide === 'home'} onChange={() => setPromptSide('home')} />
+                  {promptGame.home.name} <span className="side-tag">home</span>
+                </label>
+                <label>
+                  <input type="radio" name="import-side" checked={promptSide === 'away'} onChange={() => setPromptSide('away')} />
+                  {promptGame.away.name} <span className="side-tag">away</span>
+                </label>
+              </div>
+            )}
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowGamePrompt(false)}>
+                No live game
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={confirmGamePrompt}
+                disabled={!promptGameId || !promptSide}
+              >
+                Link Game
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
