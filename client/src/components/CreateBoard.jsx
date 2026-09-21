@@ -27,6 +27,7 @@ function CreateBoard() {
   const [importedType, setImportedType] = useState(null)
   const [importWarnings, setImportWarnings] = useState([])
   const [importNotice, setImportNotice] = useState(null)
+  const [importedGameName, setImportedGameName] = useState(null)
   const [showImport, setShowImport] = useState(false)
 
   // NFL week game picker
@@ -108,7 +109,12 @@ function CreateBoard() {
     setYTeamName(data.yTeamName)
     setImportWarnings(data.warnings || [])
     setImportNotice(null)
-    setSelectedGameId(null)
+
+    // The import matches the board's teams to this week's NFL game, so live
+    // scoring starts working without picking the matchup by hand.
+    setSelectedGameId(data.game?.eventId ? String(data.game.eventId) : null)
+    setImportedGameName(data.game?.name || null)
+    if (data.game?.xTeamSide) setXTeamSide(data.game.xTeamSide === 'away' ? 'away' : 'home')
 
     if (data.type === 'strip-10') {
       setXAxis(Array(10).fill(''))
@@ -194,8 +200,8 @@ function CreateBoard() {
         boardPayload.leagueId = leagueId
       }
 
-      if (selectedGame) {
-        boardPayload.liveGame = { eventId: selectedGame.id, xTeamSide }
+      if (selectedGameId) {
+        boardPayload.liveGame = { eventId: selectedGameId, xTeamSide }
       }
 
       boardPayload.claimMode = claimMode
@@ -296,6 +302,7 @@ function CreateBoard() {
             <span>
               Imported a {importedType === 'strip-10' ? '10-strip' : importedType} board — {xTeamName} vs {yTeamName},{' '}
               {filledSquareCount} of {importedSquares?.length || 0} squares have owners.
+              {importedGameName && <> Live scores are linked to <strong>{importedGameName}</strong>.</>}
             </span>
             <button type="button" className="btn btn-secondary btn-small" onClick={() => setShowImport(true)}>
               Import Another

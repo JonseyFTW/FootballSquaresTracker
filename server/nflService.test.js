@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const {
   espnStatusToGamePhase,
+  matchGameToTeams,
   simplifyCompetition,
   simplifyScoreboard,
   applyGameToBoard,
@@ -168,4 +169,61 @@ test('completedPeriodScores: nothing during Q1', () => {
     homeLines: [7], awayLines: [0], homeScore: 7, awayScore: 0
   });
   assert.deepStrictEqual(completedPeriodScores(game), {});
+});
+
+// Scoreboard entries as the client and the image import see them
+function scoreboardGame(id, awayName, awayAbbr, homeName, homeAbbr) {
+  return {
+    id,
+    name: `${awayName} at ${homeName}`,
+    home: { name: homeName, abbreviation: homeAbbr },
+    away: { name: awayName, abbreviation: awayAbbr }
+  };
+}
+
+const WEEK = [
+  scoreboardGame('1', 'Kansas City Chiefs', 'KC', 'San Francisco 49ers', 'SF'),
+  scoreboardGame('2', 'New York Jets', 'NYJ', 'New England Patriots', 'NE'),
+  scoreboardGame('3', 'New York Giants', 'NYG', 'New Orleans Saints', 'NO')
+];
+
+test('matchGameToTeams: nicknames, cities and abbreviations all link', () => {
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'Chiefs', '49ers'),
+    { game: WEEK[0], xTeamSide: 'away' });
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'San Francisco', 'Kansas City'),
+    { game: WEEK[0], xTeamSide: 'home' });
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'SF', 'KC'),
+    { game: WEEK[0], xTeamSide: 'home' });
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'KC Chiefs', 'SF 49ers'),
+    { game: WEEK[0], xTeamSide: 'away' });
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'new england patriots', 'new york jets'),
+    { game: WEEK[1], xTeamSide: 'home' });
+});
+
+test('matchGameToTeams: shared city words do not link the wrong matchup', () => {
+  // Must pick Jets/Patriots, not the other two "New ..." teams
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'Jets', 'Patriots'),
+    { game: WEEK[1], xTeamSide: 'away' });
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'New York Jets', 'New England Patriots'),
+    { game: WEEK[1], xTeamSide: 'away' });
+  // A city alone is fine while only one game fits it
+  assert.deepStrictEqual(matchGameToTeams(WEEK, 'New York', 'New Orleans'),
+    { game: WEEK[2], xTeamSide: 'away' });
+});
+
+test('matchGameToTeams: an ambiguous read links nothing', () => {
+  const bothNewYorkTeams = [
+    WEEK[1],
+    scoreboardGame('4', 'New York Giants', 'NYG', 'New England Patriots', 'NE')
+  ];
+  assert.strictEqual(matchGameToTeams(bothNewYorkTeams, 'New York', 'New England'), null);
+});
+
+test('matchGameToTeams: no link when the teams are not on the scoreboard', () => {
+  assert.strictEqual(matchGameToTeams(WEEK, 'Bears', 'Packers'), null);
+  // Only one side recognized is not enough to be sure of the matchup
+  assert.strictEqual(matchGameToTeams(WEEK, 'Chiefs', 'Team B'), null);
+  assert.strictEqual(matchGameToTeams(WEEK, '', ''), null);
+  assert.strictEqual(matchGameToTeams([], 'Chiefs', '49ers'), null);
+  assert.strictEqual(matchGameToTeams(undefined, 'Chiefs', '49ers'), null);
 });

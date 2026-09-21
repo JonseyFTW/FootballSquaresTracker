@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { parseImage } = require('./llmService');
-const { getScoreboard, getGame, applyGameToBoard, completedPeriodScores } = require('./nflService');
+const { getScoreboard, getGame, matchGameToTeams, applyGameToBoard, completedPeriodScores } = require('./nflService');
 const storage = require('./storage');
 const auth = require('./authService');
 const { sendPasswordResetEmail } = require('./emailService');
@@ -2002,6 +2002,20 @@ app.post('/api/parse-image', requireAuth, async (req, res) => {
     }
 
     const result = await parseImage(base64Data, mimeType, provider, API_KEYS[provider]);
+
+    // The import already read the matchup off the board, so link it to this
+    // week's game here — otherwise live scoring waits on the owner assigning
+    // the game by hand. A failed lookup just means no suggestion.
+    try {
+      const { games } = await getScoreboard();
+      const match = matchGameToTeams(games, result.xTeamName, result.yTeamName);
+      if (match) {
+        result.game = { eventId: match.game.id, xTeamSide: match.xTeamSide, name: match.game.name };
+      }
+    } catch (err) {
+      console.error('Live game match after import failed:', err.message);
+    }
+
     res.json(result);
   } catch (error) {
     console.error('Image parsing error:', error);
