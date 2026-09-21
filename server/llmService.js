@@ -9,17 +9,15 @@ const MAX_OUTPUT_TOKENS = 8192;
 // a slow model returns a readable error instead of a platform 504 page.
 const REQUEST_TIMEOUT_MS = 45000;
 
-async function fetchProvider(url, options) {
-  try {
-    return await fetch(url, { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
-  } catch (error) {
-    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
-      const timeoutError = new Error('The AI took too long to read that image. Try again, or crop the photo to just the board.');
-      timeoutError.timeout = true;
-      throw timeoutError;
-    }
-    throw error;
-  }
+function fetchProvider(url, options) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+}
+
+// The abort signal kills the response body stream too, so a timeout can
+// surface either from fetch or from reading the body afterwards.
+function isTimeout(error) {
+  const name = error?.name || error?.cause?.name;
+  return name === 'TimeoutError' || name === 'AbortError';
 }
 
 const EXTRACTION_PROMPT = `Analyze this football squares grid image and extract all the data.
@@ -464,7 +462,7 @@ function normalizeAxis(axis, label = 'Axis', warnings = []) {
 }
 
 // Main export - parse image with specified provider
-async function parseImage(imageBase64, mimeType, provider, apiKey, options = {}) {
+function callProvider(imageBase64, mimeType, provider, apiKey, options) {
   switch (provider.toLowerCase()) {
     case 'gemini':
       return parseWithGemini(imageBase64, mimeType, apiKey);
@@ -476,6 +474,24 @@ async function parseImage(imageBase64, mimeType, provider, apiKey, options = {})
       return parseWithOpenRouter(imageBase64, mimeType, apiKey, options.model);
     default:
       throw new Error(`Unknown provider: ${provider}. Use 'gemini', 'claude', 'openai', or 'openrouter'`);
+  }
+}
+
+async function parseImage(imageBase64, mimeType, provider, apiKey, options = {}) {
+  const startedAt = Date.now();
+  const model = provider === 'openrouter' ? (options.model || DEFAULT_OPENROUTER_MODEL) : provider;
+  try {
+    const result = await callProvider(imageBase64, mimeType, provider, apiKey, options);
+    console.log(`Image import: ${model} answered in ${Date.now() - startedAt}ms (${Math.round(imageBase64.length / 1024)}KB image)`);
+    return result;
+  } catch (error) {
+    console.log(`Image import: ${model} failed after ${Date.now() - startedAt}ms (${Math.round(imageBase64.length / 1024)}KB image)`);
+    if (isTimeout(error)) {
+      const timeoutError = new Error('The AI took too long to read that image. Try again, or crop the photo to just the board.');
+      timeoutError.timeout = true;
+      throw timeoutError;
+    }
+    throw error;
   }
 }
 
