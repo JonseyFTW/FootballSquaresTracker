@@ -185,9 +185,47 @@ function applyGameToBoard(board, game) {
   return board;
 }
 
+// Does a team name read off an imported board refer to this ESPN team?
+// Deliberately stricter than loose word overlap: "New York Jets" must not
+// match the Giants just because both names start with "New".
+function teamNameMatches(team, name) {
+  const normalize = (value) => String(value || '')
+    .toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const wanted = normalize(name);
+  if (!wanted) return false;
+  if (wanted === normalize(team?.abbreviation)) return true;
+
+  const full = normalize(team?.name);
+  if (!full || wanted.length < 3) return false;
+  // Whole name, city ("kansas city"), or nickname ("chiefs", "city chiefs")
+  if (full === wanted || full.startsWith(`${wanted} `) || full.endsWith(` ${wanted}`)) return true;
+
+  // The other direction: "kc chiefs" or "sf 49ers" ends with the nickname
+  const nickname = full.split(' ').pop();
+  return nickname.length >= 3 && wanted.endsWith(` ${nickname}`);
+}
+
+// Find the one scoreboard game these two team names describe, and which
+// ESPN side the x-axis team is on. Returns null when nothing matches or
+// when more than one game fits, so an ambiguous read never links the wrong
+// matchup.
+function matchGameToTeams(games, xTeamName, yTeamName) {
+  const matches = [];
+  for (const game of games || []) {
+    if (teamNameMatches(game.home, xTeamName) && teamNameMatches(game.away, yTeamName)) {
+      matches.push({ game, xTeamSide: 'home' });
+    } else if (teamNameMatches(game.away, xTeamName) && teamNameMatches(game.home, yTeamName)) {
+      matches.push({ game, xTeamSide: 'away' });
+    }
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 module.exports = {
   getScoreboard,
   getGame,
+  matchGameToTeams,
   applyGameToBoard,
   completedPeriodScores,
   espnStatusToGamePhase,
